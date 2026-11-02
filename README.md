@@ -14,7 +14,7 @@ Finally, I wrote a program that fulfils these needs.
 
 This check compares the audio data with the hash stored in the same file. It is not a comparison with a separately stored historical hash, and it does not verify that metadata has remained unchanged.
 
-## Requirements
+## Requirements and build
 
 - Go 1.27.3 or later to build the program.
 - The `flac` executable; its full path is provided with `--flac`.
@@ -24,7 +24,6 @@ Build from the project directory:
 ```powershell
 go build -o flic-go.exe .
 ```
-
 
 ## Usage
 
