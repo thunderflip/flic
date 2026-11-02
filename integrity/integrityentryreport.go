@@ -4,166 +4,149 @@ import (
 	"encoding/csv"
 	"errors"
 	"fmt"
-	"log"
+	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 )
 
-const FILE_PATH string = "File"
-const FILE_SIZE string = "Size"
-const FILE_MODTIME string = "Mod-Time"
-const DATE_CHECKED string = "Last-Check"
-
-const DATE_FORMAT string = "2006-01-02 15:04:05.999999"
+const (
+	FILE_PATH    = "File"
+	FILE_SIZE    = "Size"
+	FILE_MODTIME = "Mod-Time"
+	DATE_CHECKED = "Last-Check"
+	DATE_FORMAT  = "2006-01-02 15:04:05.999999"
+)
 
 type IntegrityEntryReport struct {
 	FilePath  string
 	Separator rune
-	headers   []string
 }
 
-func (ier *IntegrityEntryReport) GetIntegrityEntries() []IntegrityEntry {
-
-	index_FilePath, index_FileSize, index_FileModTime, index_DateChecked := -1, -1, -1, -1
-
-	datas := ier.readRows()
-	results := make([]IntegrityEntry, 0, len(*datas))
-
-	for i := range *datas {
-		row := (*datas)[i]
-		if i == 0 {
-			ier.headers = row
-			for j := range row {
-				switch row[j] {
-				case FILE_PATH:
-					index_FilePath = j
-				case FILE_SIZE:
-					index_FileSize = j
-				case FILE_MODTIME:
-					index_FileModTime = j
-				case DATE_CHECKED:
-					index_DateChecked = j
-				}
-			}
-		} else {
-			filePath := row[index_FilePath]
-			fileSize, _ := strconv.ParseInt(row[index_FileSize], 10, 64)
-			fileModTime, _ := parseUnixUTC(row[index_FileModTime])
-			dateChecked, _ := time.Parse(DATE_FORMAT, row[index_DateChecked])
-
-			ie := IntegrityEntry{
-				FilePath:    filePath,
-				FileSize:    fileSize,
-				FileModTime: *fileModTime,
-				DateChecked: &dateChecked,
-			}
-			results = append(results, ie)
-		}
+func (ier *IntegrityEntryReport) GetIntegrityEntries() ([]IntegrityEntry, error) {
+	f, err := os.Open(ier.FilePath)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
 	}
-	return results
-}
-
-func (ier *IntegrityEntryReport) SetIntegrityEntries(datas []IntegrityEntry) {
-
-	records := make([][]string, 0, len(datas)+1)
-
-	records = append(records, ier.headers)
-
-	for i := range datas {
-		var record []string
-		record = append(record, datas[i].FilePath)
-		record = append(record, strconv.FormatInt(datas[i].FileSize, 10))
-		record = append(record, strUnixUTC(datas[i].FileModTime))
-
-		date_checked_string := (*datas[i].DateChecked).Format(DATE_FORMAT)
-		parts := strings.SplitN(date_checked_string, ".", 2)
-		if len(parts) == 1 {
-			date_checked_string = date_checked_string + ".000000"
-		}
-		record = append(record, date_checked_string)
-
-		records = append(records, record)
-	}
-
-	ier.writeRows(&records)
-}
-
-func (ier *IntegrityEntryReport) readRows() *[][]string {
-
-	var results *[][]string
-
-	_, err := os.Stat(ier.FilePath)
-	if !errors.Is(err, os.ErrExist) {
-		fd, err := os.Open(ier.FilePath)
-		if err != nil {
-			fmt.Println(err)
-		}
-
-		reader := csv.NewReader(fd)
-		reader.Comma = ier.Separator
-
-		records, err := reader.ReadAll()
-		if err != nil {
-			fmt.Println(err)
-		}
-		results = &records
-
-		fd.Close()
-	}
-
-	return results
-}
-
-func (ier *IntegrityEntryReport) writeRows(records *[][]string) {
-
-	fd, err := os.Create(ier.FilePath)
 	if err != nil {
-		log.Fatalf("failed creating file: %s", err)
+		return nil, fmt.Errorf("open report %q: %w", ier.FilePath, err)
 	}
-	writer := csv.NewWriter(fd)
+	defer f.Close()
+	reader := csv.NewReader(f)
+	reader.Comma = ier.Separator
+	headers, err := reader.Read()
+	if errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("report %q is empty", ier.FilePath)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read report header: %w", err)
+	}
+	indexes := make(map[string]int)
+	for i, header := range headers {
+		if _, exists := indexes[header]; exists {
+			return nil, fmt.Errorf("duplicate report column %q", header)
+		}
+		indexes[header] = i
+	}
+	for _, header := range []string{FILE_PATH, FILE_SIZE, FILE_MODTIME, DATE_CHECKED} {
+		if _, ok := indexes[header]; !ok {
+			return nil, fmt.Errorf("missing report column %q", header)
+		}
+	}
+	// Extra columns cannot be preserved by the current report model.
+	if len(headers) != 4 {
+		return nil, fmt.Errorf("report contains unsupported columns")
+	}
+	var entries []IntegrityEntry
+	for line := 2; ; line++ {
+		row, err := reader.Read()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("read report row %d: %w", line, err)
+		}
+		size, err := strconv.ParseInt(row[indexes[FILE_SIZE]], 10, 64)
+		if err != nil || size < 0 {
+			return nil, fmt.Errorf("invalid file size on report row %d", line)
+		}
+		modified, err := parseUnixUTC(row[indexes[FILE_MODTIME]])
+		if err != nil {
+			return nil, fmt.Errorf("invalid modification time on report row %d: %w", line, err)
+		}
+		checkedText := row[indexes[DATE_CHECKED]]
+		checked, err := time.ParseInLocation(DATE_FORMAT, checkedText, time.Local)
+		if err != nil {
+			return nil, fmt.Errorf("invalid check date on report row %d: %w", line, err)
+		}
+		// The sentinel is a fixed instant, independent of the machine's timezone.
+		if checked.Format(DATE_FORMAT) == DATE_UNDEFINED.Format(DATE_FORMAT) {
+			checked = DATE_UNDEFINED
+		}
+		entries = append(entries, IntegrityEntry{FilePath: row[indexes[FILE_PATH]], FileSize: size, FileModTime: modified, DateChecked: &checked})
+	}
+	return entries, nil
+}
+
+func (ier *IntegrityEntryReport) SetIntegrityEntries(entries []IntegrityEntry) (err error) {
+	f, err := os.CreateTemp(filepath.Dir(ier.FilePath), ".flic-report-*")
+	if err != nil {
+		return fmt.Errorf("create temporary report: %w", err)
+	}
+	name := f.Name()
+	defer func() { f.Close(); os.Remove(name) }()
+	writer := csv.NewWriter(f)
 	writer.Comma = ier.Separator
-
-	for _, record := range *records {
-		err := writer.Write(record)
-		if err != nil {
-			log.Fatalln("error writing record to file", err)
+	if err = writer.Write([]string{FILE_PATH, FILE_SIZE, FILE_MODTIME, DATE_CHECKED}); err != nil {
+		return fmt.Errorf("write report header: %w", err)
+	}
+	for _, entry := range entries {
+		if entry.DateChecked == nil {
+			return fmt.Errorf("missing check date for %q", entry.FilePath)
+		}
+		checked := entry.DateChecked.Local()
+		if entry.DateChecked.Equal(DATE_UNDEFINED) {
+			checked = DATE_UNDEFINED
+		}
+		row := []string{entry.FilePath, strconv.FormatInt(entry.FileSize, 10), strUnixUTC(entry.FileModTime), checked.Format(DATE_FORMAT)}
+		if err = writer.Write(row); err != nil {
+			return fmt.Errorf("write report: %w", err)
 		}
 	}
-
 	writer.Flush()
-	fd.Close()
+	if err = writer.Error(); err != nil {
+		return fmt.Errorf("flush report: %w", err)
+	}
+	if err = f.Sync(); err != nil {
+		return fmt.Errorf("sync report: %w", err)
+	}
+	if err = f.Close(); err != nil {
+		return fmt.Errorf("close report: %w", err)
+	}
+	if err = os.Rename(name, ier.FilePath); err != nil {
+		return fmt.Errorf("replace report: %w", err)
+	}
+	return nil
 }
 
-func parseUnixUTC(p_param string) (*time.Time, error) {
-
-	if len(p_param) < 20 {
-		p_param = p_param + strings.Repeat("0", 20-len(p_param))
+func parseUnixUTC(value string) (time.Time, error) {
+	parts := strings.Split(value, ".")
+	if len(parts) != 2 || len(parts[1]) == 0 || len(parts[1]) > 9 {
+		return time.Time{}, fmt.Errorf("invalid timestamp %q", value)
 	}
-	parts := strings.SplitN(p_param, ".", 2)
-
-	sec, err := strconv.ParseInt(parts[0], 10, 64)
+	seconds, err := strconv.ParseInt(parts[0], 10, 64)
 	if err != nil {
-		fmt.Println("Error converting whole part:", err)
+		return time.Time{}, err
 	}
-
-	nsec, err := strconv.ParseInt(parts[1], 10, 64)
-	if err != nil {
-		fmt.Println("Error converting fractional part:", err)
+	fraction := parts[1] + strings.Repeat("0", 9-len(parts[1]))
+	nanos, err := strconv.ParseInt(fraction, 10, 64)
+	if err != nil || nanos < 0 {
+		return time.Time{}, fmt.Errorf("invalid fractional seconds %q", parts[1])
 	}
-
-	result := time.Unix(sec, nsec)
-
-	return &result, nil
+	return time.Unix(seconds, nanos).UTC(), nil
 }
-
-func strUnixUTC(p_param time.Time) string {
-	epochref := time.Unix(0, 0)
-	difftime := p_param.Sub(epochref).Nanoseconds()
-
-	s2 := fmt.Sprintf("%d", difftime)
-	s2 = s2[:10] + "." + s2[10:]
-
-	return s2
+func strUnixUTC(value time.Time) string {
+	return fmt.Sprintf("%d.%09d", value.Unix(), value.Nanosecond())
 }

@@ -8,16 +8,7 @@ import (
 	"strings"
 )
 
-// https://xiph.org/flac/documentation_tools_metaflac.html
-// https://xiph.org/flac/documentation_tools_flac.html
-// https://github.com/xiph/flac/blob/9b3826006a3fc27b34d9297a9a8194accacc2c44/src/flac/main.c
-
-
-type FlacOperation struct {
-	flac_path string
-	metaflac_path string
-	file_path string
-}
+type FlacOperation struct{ flac_path, metaflac_path, file_path string }
 
 func (f *FlacOperation) GetHash() (string, error) {
 	arg := []string{"--show-md5sum", f.file_path}
@@ -27,13 +18,21 @@ func (f *FlacOperation) GetHash() (string, error) {
 		return "", err
 	}
 
-	match := regexp.MustCompile(`(^\S*)\S+.*`).FindStringSubmatch(string(output))
-	if match == nil || len(match) != 2 {
+	hash, err := parseFlacHash(string(output))
+	if err != nil {
 		log.Printf("Failed to parse metaflac output: %s", string(output))
-		return "", fmt.Errorf("failed to parse metaflac output")
+		return "", err
 	}
 
-	return match[1], nil
+	return hash, nil
+}
+
+func parseFlacHash(output string) (string, error) {
+	hash := strings.TrimSpace(output)
+	if !regexp.MustCompile(`^[0-9a-fA-F]{32}$`).MatchString(hash) {
+		return "", fmt.Errorf("invalid metaflac MD5 output")
+	}
+	return hash, nil
 }
 
 func (f *FlacOperation) Reencode() (bool, error) {
@@ -53,7 +52,7 @@ func (f *FlacOperation) Reencode() (bool, error) {
 	// Search for 'Verify OK' pattern
 	matched := regexp.MustCompile(`.*Verify OK,.*`).MatchString(output)
 	if !matched {
-		log.Println("FLAC verification failed:\n%s", output)
+		log.Printf("FLAC verification failed:\n%s", output)
 		return false, fmt.Errorf("FLAC verification failed")
 	}
 
@@ -61,29 +60,22 @@ func (f *FlacOperation) Reencode() (bool, error) {
 	return true, nil
 }
 
-func (f *FlacOperation) Test() (bool, error) {
-	args := []string{"--test", f.file_path}
-	out, err := exec.Command(f.flac_path, args...).CombinedOutput()
+func (f *FlacOperation) Test() error {
+	output, err := exec.Command(f.flac_path, "--test", f.file_path).CombinedOutput()
 	if err != nil {
-		log.Printf("Error running flac: %v", err)
-		return false, err
+		return fmt.Errorf("run flac: %w: %s", err, strings.TrimSpace(string(output)))
 	}
+	return validateFlacTestOutput(string(output))
+}
 
-	output := string(out)
-	if strings.TrimSpace(output) == "" {
-		log.Println("FLAC output expected")
-		return false, fmt.Errorf("FLAC output is empty")
+func validateFlacTestOutput(output string) error {
+	if strings.Contains(output, "WARNING, cannot check MD5 signature") {
+		return fmt.Errorf("FLAC MD5 verification unavailable: %s", strings.TrimSpace(output))
 	}
-
-	// Search for '*ok' at the end of each line
-	lines := strings.Split(output, "\n")
-	for _, line := range lines {
-		if matched := regexp.MustCompile(`.*ok`).MatchString(line); matched {
-			//log.Println("FLAC verification successful")
-			return true, nil
-		}
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	last := strings.TrimSpace(lines[len(lines)-1])
+	if !regexp.MustCompile(`(?:^|:|\x08|\r)\s*ok\s*$`).MatchString(last) {
+		return fmt.Errorf("FLAC verification failed: expected final ok in output: %s", strings.TrimSpace(output))
 	}
-
-	log.Println("FLAC verification failed:\n%s", output)
-	return false, fmt.Errorf("FLAC verification failed")
+	return nil
 }
