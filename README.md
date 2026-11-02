@@ -33,7 +33,7 @@ go build -o flic-go.exe .
 | `--flac <path>`       | Path to the `flac` executable (**mandatory**) |
 | `--folder <path>`        | Root folder of the FLAC collection; subfolders are searched recursively (**mandatory**) |
 | `--report <path>`   | Path to the report file (**mandatory**) |
-| `--age <number>`   | Check files by age in minutes; `-1` selects never-checked files and `-2` selects files checked before today |
+| `--age <number>`   | Select files by the age of their last check; see [Age values](#age-values) |
 | `--min-percentage <number>`  | Minimum percentage of collection to check |
 | `--max-percentage <number>`  | Maximum percentage of collection to check |
 | `--max-missing-percentage <number>` | Maximum percentage of report entries allowed to be missing (default: 50) |
@@ -46,44 +46,61 @@ Use absolute paths for the executable, collection and report. For example, in Po
 
 Choose `--age` or `--min-percentage` to identify files to check. `--max-percentage` can only be used with `--age`. The program normally selects the oldest checks first; when all files are selected, it checks them in path order.
 
-`--age` can be used alone. With a non-negative value, it selects files not checked within that number of minutes. For example, use `--age=10080` for one week. `--age=-1` selects files that have never been checked, including files detected as new or modified. `--age=-2` selects files last checked before the beginning of the current local day.
+### Age values
+
+`--age` can be used alone. It accepts the following values:
+
+| Value | Files selected |
+| --- | --- |
+| `--age=-1` | Files never checked, including files detected as new or modified |
+| `--age=-2` | Files last checked at or before the start of the current local day |
+| `--age=0` | Files last checked up to the current time |
+| `--age=10080` | Files last checked at least 10,080 minutes ago (one week) |
+
+Any other non-negative value specifies an age in minutes. Negative values other than `-1` and `-2` are invalid.
+
+### Percentage options
 
 `--min-percentage` can be used alone. To check at least 25% of your collection, use `--min-percentage=25`.
 
-`--max-percentage` limits the number of files selected by `--age`; it cannot be used alone. `--min-percentage` and `--max-percentage` cannot be combined.
+`--max-percentage` limits the number of files selected by `--age`; it cannot be used alone.
+
+`--min-percentage` and `--max-percentage` cannot be combined.
+
+Percentages must be between 0 and 100. Minimum percentages are rounded up to a whole file, while maximum percentages are rounded down.
 
 `--age` can be combined with either percentage option:
 
 * With `--min-percentage`, the program checks whichever is larger: the number selected by age or the minimum percentage.
 * With `--max-percentage`, it checks whichever is smaller: the number selected by age or the maximum percentage.
 
-For example,
-
-| Files identified by `--age`  | Files identified by `--min-percentage`  | Files to check |
-| --------                     | --------                                | --------  |
-| 357 files                    | **761 files**                           | **761 files** since 761 > 357 |
-| **860 files**                | 252 files                               | **860 files** since 860 > 252 |
-
-
-| Files identified by `--age`  | Files identified by `--max-percentage`  | Files to check |
-| --------                     | --------                                | -------- |
-| 593 files                    | **247 files**                           | **247 files** since 247 < 593 |
-| **145 files**                | 465 files                               | **145 files** since 145 < 465 |
-
-
-## Report and safety
+## Report
 
 The report is created on the first run. Its parent directory must already exist. Existing reports must contain the four columns `File`, `Size`, `Mod-Time`, and `Last-Check`; malformed reports are rejected without overwriting them. `Last-Check` is stored in the local timezone, without a timezone offset.
 
+### Detecting changes
+
 The program detects new or modified files using their paths, sizes and modification times, with a one-millisecond tolerance on modification times. This quick scan can miss a change if the size and modification time are preserved. Periodic checks of older files remain useful.
 
-The report is saved every 3 minutes, after a file finishes checking, and again at the end. A temporary file is written before the report is replaced. If FLAC reports an error or cannot verify the stored MD5, the program stops at that file and saves completed checks before exiting with an error. An existing earlier check date for the failed file is currently retained.
+### Saving and verification errors
+
+The report is saved every 3 minutes, after a file finishes checking, and again at the end. A temporary file is written before the report is replaced.
+
+If FLAC reports an error or cannot verify the stored MD5, the program stops at that file and saves completed checks before exiting with an error. An existing earlier check date for the failed file is currently retained.
+
+### Concurrent runs
 
 While a report is in use, a `<report>.lock` file prevents another instance from using the same report. It records the machine, process ID, and start time. After an abrupt interruption the lock may remain; check that no process is using the report before removing it manually. This protection requires all instances to use the same lock path and a filesystem that supports exclusive file creation.
 
-Before changing the report, the program compares its existing file paths with the scanned collection. On Windows, case differences are ignored. If multiple paths become indistinguishable, the program stops without changing the report. If more than `--max-missing-percentage` percent are missing, it stops and leaves the report unchanged. The default is 50; set it to 0 to reject any missing entry, or 100 to allow all missing entries. Missing entries within the limit are removed from the report. Renamed or moved files count as missing under their former paths.
+### Missing files
 
-Percentages must be between 0 and 100. Minimum percentages are rounded up to a whole file, while maximum percentages are rounded down. Exit status is 0 for success, 2 for invalid options, and 1 for other errors.
+Before changing the report, the program compares its existing file paths with the scanned collection. On Windows, case differences are ignored. If multiple paths become indistinguishable, the program stops without changing the report.
+
+If more than `--max-missing-percentage` percent of report entries are missing, the program stops and leaves the report unchanged. The default is 50; set it to 0 to reject any missing entry, or 100 to allow all missing entries. Missing entries within the limit are removed from the report. Renamed or moved files count as missing under their former paths.
+
+## Exit status
+
+Exit status is 0 for success, 2 for invalid options, and 1 for other errors.
 
 ## License
 
