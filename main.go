@@ -19,12 +19,12 @@ const autosaveInterval = 3 * time.Minute
 const defaultMaxMissingPercentage = 50
 const optionNotSet = math.MinInt32
 
-func mergeReportAndFiles(report, files []integrity.IntegrityEntry) []integrity.IntegrityEntry {
-	old := make(map[string]integrity.IntegrityEntry, len(report))
+func mergeReportAndFiles(report, files []integrity.Entry) []integrity.Entry {
+	old := make(map[string]integrity.Entry, len(report))
 	for _, entry := range report {
 		old[comparisonPath(entry.FilePath)] = entry
 	}
-	results := make([]integrity.IntegrityEntry, 0, len(files))
+	results := make([]integrity.Entry, 0, len(files))
 	for _, file := range files {
 		if entry, ok := old[comparisonPath(file.FilePath)]; ok && entry.FileSize == file.FileSize && entry.FileModTime.Sub(file.FileModTime).Abs() <= modtimeTolerance {
 			entry.FilePath = file.FilePath
@@ -89,13 +89,13 @@ func validateOptions(flac, folder, report string, age, minPercent, maxPercent, m
 	return nil
 }
 
-func selectionLimit(entries []integrity.IntegrityEntry, age, minPercent, maxPercent int, now time.Time) int {
+func selectionLimit(entries []integrity.Entry, age, minPercent, maxPercent int, now time.Time) int {
 	limit := 0
 	if age != optionNotSet {
 		var cutoff time.Time
 		switch age {
 		case -1:
-			cutoff = integrity.DATE_UNDEFINED
+			cutoff = integrity.DateUndefined
 		case -2:
 			y, m, d := now.Date()
 			cutoff = time.Date(y, m, d, 0, 0, 0, 0, now.Location())
@@ -122,12 +122,12 @@ func check(flac, folder, report string, age, minPercent, maxPercent, maxMissingP
 		return err
 	}
 	defer func() { resultErr = errors.Join(resultErr, lock.release()) }()
-	store := integrity.IntegrityEntryReport{FilePath: report, Separator: ';'}
-	previous, err := store.GetIntegrityEntries()
+	store := integrity.Report{FilePath: report, Separator: ';'}
+	previous, err := store.Load()
 	if err != nil {
 		return err
 	}
-	files, err := (integrity.IntegrityEntryDirectory{DirPath: folder}).GetIntegrityEntries()
+	files, err := (integrity.Directory{DirPath: folder}).Scan()
 	if err != nil {
 		return err
 	}
@@ -152,29 +152,29 @@ func check(flac, folder, report string, age, minPercent, maxPercent, maxMissingP
 	for i := 0; i < limit; i++ {
 		path := entries[i].FilePath
 		fmt.Printf("Verifying (%d/%d): %s\n", i+1, limit, path)
-		operation := FlacOperation{flac_path: flac, file_path: path}
+		operation := FlacOperation{flacPath: flac, filePath: path}
 		if err := operation.Test(); err != nil {
-			saveErr := store.SetIntegrityEntries(entries)
+			saveErr := store.Save(entries)
 			return errors.Join(fmt.Errorf("verify %q: %w", path, err), saveErr)
 		}
 		now := time.Now()
 		entries[i].DateChecked = &now
 		checked++
 		if now.Sub(lastSave) >= autosaveInterval {
-			if err := store.SetIntegrityEntries(entries); err != nil {
+			if err := store.Save(entries); err != nil {
 				return err
 			}
 			lastSave = now
 		}
 	}
-	if err := store.SetIntegrityEntries(entries); err != nil {
+	if err := store.Save(entries); err != nil {
 		return err
 	}
 	fmt.Printf("Checked %d file(s) in %s.\n", checked, time.Since(start).Round(time.Millisecond))
 	return nil
 }
 
-func validateUniquePaths(entries []integrity.IntegrityEntry) error {
+func validateUniquePaths(entries []integrity.Entry) error {
 	seen := make(map[string]string, len(entries))
 	for _, entry := range entries {
 		key := comparisonPath(entry.FilePath)
@@ -186,7 +186,7 @@ func validateUniquePaths(entries []integrity.IntegrityEntry) error {
 	return nil
 }
 
-func checkMissingEntries(previous, files []integrity.IntegrityEntry, maxPercent int) error {
+func checkMissingEntries(previous, files []integrity.Entry, maxPercent int) error {
 	if len(previous) == 0 {
 		return nil
 	}

@@ -8,11 +8,17 @@ import (
 	"strings"
 )
 
-type FlacOperation struct{ flac_path, metaflac_path, file_path string }
+var (
+	md5Pattern      = regexp.MustCompile(`^[0-9a-fA-F]{32}$`)
+	verifyOKPattern = regexp.MustCompile(`Verify OK,`)
+	testOKPattern   = regexp.MustCompile(`(?:^|:|\x08|\r)\s*ok\s*$`)
+)
+
+type FlacOperation struct{ flacPath, metaflacPath, filePath string }
 
 func (f *FlacOperation) GetHash() (string, error) {
-	arg := []string{"--show-md5sum", f.file_path}
-	output, err := exec.Command(f.metaflac_path, arg...).Output()
+	arg := []string{"--show-md5sum", f.filePath}
+	output, err := exec.Command(f.metaflacPath, arg...).Output()
 	if err != nil {
 		log.Printf("Error running metaflac: %v", err)
 		return "", err
@@ -29,15 +35,15 @@ func (f *FlacOperation) GetHash() (string, error) {
 
 func parseFlacHash(output string) (string, error) {
 	hash := strings.TrimSpace(output)
-	if !regexp.MustCompile(`^[0-9a-fA-F]{32}$`).MatchString(hash) {
+	if !md5Pattern.MatchString(hash) {
 		return "", fmt.Errorf("invalid metaflac MD5 output")
 	}
 	return hash, nil
 }
 
 func (f *FlacOperation) Reencode() (bool, error) {
-	args := []string{"--force", "--no-error-on-compression-fail", "--verify", f.file_path}
-	out, err := exec.Command(f.flac_path, args...).CombinedOutput()
+	args := []string{"--force", "--no-error-on-compression-fail", "--verify", f.filePath}
+	out, err := exec.Command(f.flacPath, args...).CombinedOutput()
 	if err != nil {
 		log.Printf("Error running flac: %v", err)
 		return false, err
@@ -50,7 +56,7 @@ func (f *FlacOperation) Reencode() (bool, error) {
 	}
 
 	// Search for 'Verify OK' pattern
-	matched := regexp.MustCompile(`.*Verify OK,.*`).MatchString(output)
+	matched := verifyOKPattern.MatchString(output)
 	if !matched {
 		log.Printf("FLAC verification failed:\n%s", output)
 		return false, fmt.Errorf("FLAC verification failed")
@@ -61,7 +67,7 @@ func (f *FlacOperation) Reencode() (bool, error) {
 }
 
 func (f *FlacOperation) Test() error {
-	output, err := exec.Command(f.flac_path, "--test", f.file_path).CombinedOutput()
+	output, err := exec.Command(f.flacPath, "--test", f.filePath).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("run flac: %w: %s", err, strings.TrimSpace(string(output)))
 	}
@@ -74,7 +80,7 @@ func validateFlacTestOutput(output string) error {
 	}
 	lines := strings.Split(strings.TrimSpace(output), "\n")
 	last := strings.TrimSpace(lines[len(lines)-1])
-	if !regexp.MustCompile(`(?:^|:|\x08|\r)\s*ok\s*$`).MatchString(last) {
+	if !testOKPattern.MatchString(last) {
 		return fmt.Errorf("FLAC verification failed: expected final ok in output: %s", strings.TrimSpace(output))
 	}
 	return nil

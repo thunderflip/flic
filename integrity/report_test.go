@@ -10,8 +10,8 @@ import (
 
 func TestReportReadWrite(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "report.csv")
-	report := IntegrityEntryReport{FilePath: path, Separator: ';'}
-	entries, err := report.GetIntegrityEntries()
+	report := Report{FilePath: path, Separator: ';'}
+	entries, err := report.Load()
 	if err != nil || len(entries) != 0 {
 		t.Fatalf("missing report: %v, %v", entries, err)
 	}
@@ -19,17 +19,17 @@ func TestReportReadWrite(t *testing.T) {
 	if err := os.WriteFile(path, []byte(data), 0600); err != nil {
 		t.Fatal(err)
 	}
-	entries, err = report.GetIntegrityEntries()
+	entries, err = report.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(entries) != 1 || entries[0].FilePath != "short.flac" || entries[0].FileSize != 42 || entries[0].FileModTime.Nanosecond() != 123456789 {
 		t.Fatalf("unexpected entries: %+v", entries)
 	}
-	if err := report.SetIntegrityEntries(entries); err != nil {
+	if err := report.Save(entries); err != nil {
 		t.Fatal(err)
 	}
-	again, err := report.GetIntegrityEntries()
+	again, err := report.Load()
 	if err != nil || len(again) != 1 || again[0].FilePath != entries[0].FilePath || !again[0].FileModTime.Equal(entries[0].FileModTime) {
 		t.Fatalf("round trip: %+v, %v", again, err)
 	}
@@ -42,8 +42,8 @@ func TestInvalidReports(t *testing.T) {
 			if err := os.WriteFile(path, []byte(data), 0600); err != nil {
 				t.Fatal(err)
 			}
-			r := IntegrityEntryReport{FilePath: path, Separator: ';'}
-			if _, err := r.GetIntegrityEntries(); err == nil {
+			r := Report{FilePath: path, Separator: ';'}
+			if _, err := r.Load(); err == nil {
 				t.Fatal("expected error")
 			}
 		})
@@ -56,8 +56,8 @@ func TestFailedWritePreservesReport(t *testing.T) {
 	if err := os.WriteFile(path, []byte(original), 0600); err != nil {
 		t.Fatal(err)
 	}
-	r := IntegrityEntryReport{FilePath: path, Separator: ';'}
-	if err := r.SetIntegrityEntries([]IntegrityEntry{{FilePath: "missing date"}}); err == nil {
+	r := Report{FilePath: path, Separator: ';'}
+	if err := r.Save([]Entry{{FilePath: "missing date"}}); err == nil {
 		t.Fatal("expected error")
 	}
 	content, err := os.ReadFile(path)
@@ -83,12 +83,12 @@ func TestReportUsesLocalCheckDates(t *testing.T) {
 	time.Local = time.FixedZone("test", 2*60*60)
 	t.Cleanup(func() { time.Local = previousLocation })
 	checked := time.Date(2024, 7, 1, 12, 30, 0, 0, time.UTC)
-	report := IntegrityEntryReport{FilePath: filepath.Join(t.TempDir(), "report.csv"), Separator: ';'}
-	entries := []IntegrityEntry{
+	report := Report{FilePath: filepath.Join(t.TempDir(), "report.csv"), Separator: ';'}
+	entries := []Entry{
 		{FilePath: "checked.flac", FileModTime: checked, DateChecked: &checked},
-		{FilePath: "new.flac", FileModTime: checked, DateChecked: &DATE_UNDEFINED},
+		{FilePath: "new.flac", FileModTime: checked, DateChecked: &DateUndefined},
 	}
-	if err := report.SetIntegrityEntries(entries); err != nil {
+	if err := report.Save(entries); err != nil {
 		t.Fatal(err)
 	}
 	content, err := os.ReadFile(report.FilePath)
@@ -98,11 +98,11 @@ func TestReportUsesLocalCheckDates(t *testing.T) {
 	if !strings.Contains(string(content), "2024-07-01 14:30:00") {
 		t.Fatalf("expected local date in report: %s", content)
 	}
-	read, err := report.GetIntegrityEntries()
+	read, err := report.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !read[0].DateChecked.Equal(checked) || !read[1].DateChecked.Equal(DATE_UNDEFINED) {
+	if !read[0].DateChecked.Equal(checked) || !read[1].DateChecked.Equal(DateUndefined) {
 		t.Fatalf("unexpected check dates: %v, %v", read[0].DateChecked, read[1].DateChecked)
 	}
 }

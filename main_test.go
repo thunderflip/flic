@@ -24,8 +24,8 @@ func TestPathComparisonPreservesHistory(t *testing.T) {
 	}
 	checked := time.Now().Add(-time.Hour)
 	modified := time.Now()
-	previous := []integrity.IntegrityEntry{{FilePath: reportPath, FileSize: 123, FileModTime: modified, DateChecked: &checked}}
-	files := []integrity.IntegrityEntry{{FilePath: path, FileSize: 123, FileModTime: modified, DateChecked: &integrity.DATE_UNDEFINED}}
+	previous := []integrity.Entry{{FilePath: reportPath, FileSize: 123, FileModTime: modified, DateChecked: &checked}}
+	files := []integrity.Entry{{FilePath: path, FileSize: 123, FileModTime: modified, DateChecked: &integrity.DateUndefined}}
 	if err := checkMissingEntries(previous, files, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -37,12 +37,12 @@ func TestPathComparisonPreservesHistory(t *testing.T) {
 
 func TestAmbiguousPathsRejected(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "track.flac")
-	entries := []integrity.IntegrityEntry{{FilePath: path}, {FilePath: path}}
+	entries := []integrity.Entry{{FilePath: path}, {FilePath: path}}
 	if err := validateUniquePaths(entries); err == nil {
 		t.Fatal("expected duplicate path error")
 	}
 	if runtime.GOOS == "windows" {
-		entries = []integrity.IntegrityEntry{{FilePath: "Track.flac"}, {FilePath: "track.flac"}}
+		entries = []integrity.Entry{{FilePath: "Track.flac"}, {FilePath: "track.flac"}}
 		if err := validateUniquePaths(entries); err == nil {
 			t.Fatal("expected case collision error")
 		}
@@ -63,9 +63,9 @@ func TestValidateOptions(t *testing.T) {
 }
 
 func TestMissingEntriesThreshold(t *testing.T) {
-	previous := []integrity.IntegrityEntry{{FilePath: "a"}, {FilePath: "b"}}
+	previous := []integrity.Entry{{FilePath: "a"}, {FilePath: "b"}}
 	for _, tc := range []struct {
-		files     []integrity.IntegrityEntry
+		files     []integrity.Entry
 		threshold int
 		blocked   bool
 	}{
@@ -90,12 +90,12 @@ func TestMissingEntriesThreshold(t *testing.T) {
 func TestMissingEntriesPreserveReport(t *testing.T) {
 	dir := t.TempDir()
 	report := filepath.Join(dir, "report.csv")
-	store := integrity.IntegrityEntryReport{FilePath: report, Separator: ';'}
-	entries := []integrity.IntegrityEntry{
-		{FilePath: filepath.Join(dir, "a.flac"), DateChecked: &integrity.DATE_UNDEFINED},
-		{FilePath: filepath.Join(dir, "b.flac"), DateChecked: &integrity.DATE_UNDEFINED},
+	store := integrity.Report{FilePath: report, Separator: ';'}
+	entries := []integrity.Entry{
+		{FilePath: filepath.Join(dir, "a.flac"), DateChecked: &integrity.DateUndefined},
+		{FilePath: filepath.Join(dir, "b.flac"), DateChecked: &integrity.DateUndefined},
 	}
-	if err := store.SetIntegrityEntries(entries); err != nil {
+	if err := store.Save(entries); err != nil {
 		t.Fatal(err)
 	}
 	before, err := os.ReadFile(report)
@@ -120,7 +120,7 @@ func TestSelectionLimit(t *testing.T) {
 	now := time.Date(2024, 1, 3, 12, 0, 0, 0, time.FixedZone("test", 3600))
 	old := now.Add(-48 * time.Hour)
 	recent := now.Add(-time.Hour)
-	entries := []integrity.IntegrityEntry{{DateChecked: &old}, {DateChecked: &recent}, {DateChecked: &recent}}
+	entries := []integrity.Entry{{DateChecked: &old}, {DateChecked: &recent}, {DateChecked: &recent}}
 	if got := selectionLimit(entries, -2, math.MinInt32, math.MinInt32, now); got != 1 {
 		t.Fatalf("today: %d", got)
 	}
@@ -141,9 +141,9 @@ func TestFailedVerificationSavesProgress(t *testing.T) {
 	if err := check(filepath.Join(dir, "missing-flac"), dir, report, math.MinInt32, 100, math.MinInt32, 50); err == nil {
 		t.Fatal("expected verification failure")
 	}
-	store := integrity.IntegrityEntryReport{FilePath: report, Separator: ';'}
-	entries, err := store.GetIntegrityEntries()
-	if err != nil || len(entries) != 1 || !entries[0].DateChecked.Equal(integrity.DATE_UNDEFINED) {
+	store := integrity.Report{FilePath: report, Separator: ';'}
+	entries, err := store.Load()
+	if err != nil || len(entries) != 1 || !entries[0].DateChecked.Equal(integrity.DateUndefined) {
 		t.Fatalf("saved progress: %+v %v", entries, err)
 	}
 }

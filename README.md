@@ -22,7 +22,7 @@ This check compares the audio data with the hash stored in the same file. It is 
 Build from the project directory:
 
 ```powershell
-go build -o flic-go.exe .
+go build -o flic.exe .
 ```
 
 ## Usage
@@ -40,7 +40,7 @@ go build -o flic-go.exe .
 Use absolute paths for the executable, collection and report. For example, in PowerShell:
 
 ```powershell
-.\flic-go.exe --flac="C:\Tools\flac.exe" --folder="D:\Music" --report="D:\Reports\integrity.csv" --age=-1
+.\flic.exe --flac="C:\Tools\flac.exe" --folder="D:\Music" --report="D:\Reports\integrity.csv" --age=-1
 ```
 
 Choose `--age` or `--min-percentage` to identify files to check. `--max-percentage` can only be used with `--age`. The program normally selects the oldest checks first; when all files are selected, it checks them in path order.

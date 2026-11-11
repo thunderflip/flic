@@ -30,7 +30,7 @@ func TestGetHashIntegration(t *testing.T) {
 	if metaflac == "" || file == "" {
 		t.Skip("set FLIC_TEST_METAFLAC and FLIC_TEST_FILE to run")
 	}
-	op := FlacOperation{metaflac_path: metaflac, file_path: file}
+	op := FlacOperation{metaflacPath: metaflac, filePath: file}
 	hash, err := op.GetHash()
 	if err != nil {
 		t.Fatal(err)
@@ -67,7 +67,7 @@ func TestFlacTestOutputOK(t *testing.T) {
 }
 
 func TestFlacTestCommandFailure(t *testing.T) {
-	op := FlacOperation{flac_path: filepath.Join(t.TempDir(), "missing-flac"), file_path: "track.flac"}
+	op := FlacOperation{flacPath: filepath.Join(t.TempDir(), "missing-flac"), filePath: "track.flac"}
 	if err := op.Test(); err == nil {
 		t.Fatal("expected command failure")
 	}
