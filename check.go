@@ -28,7 +28,10 @@ type options struct {
 	flacPath, folder, report string
 	// age, minPercent and maxPercent select the files to check.
 	age, minPercent, maxPercent optionalInt
-	maxMissingPercent           int
+	// perDay makes minPercent and maxPercent daily totals: files already
+	// checked today count toward them.
+	perDay            bool
+	maxMissingPercent int
 }
 
 // defaultOptions returns options with no file selection and the default
@@ -98,11 +101,16 @@ func check(ctx context.Context, opts options) (resultErr error) {
 	}
 	entries := mergeReportAndFiles(previous, files)
 	sort.Slice(entries, func(i, j int) bool { return entries[i].DateChecked.Before(*entries[j].DateChecked) })
-	limit := selectionLimit(entries, opts, time.Now())
+	now := time.Now()
+	limit := selectionLimit(entries, opts, now)
+	if opts.perDay {
+		fmt.Printf("Found %d FLAC file(s), %d already checked today; checking %d.\n", len(entries), checkedSince(entries, startOfDay(now)), limit)
+	} else {
+		fmt.Printf("Found %d FLAC file(s); checking %d.\n", len(entries), limit)
+	}
 	if limit == len(entries) {
 		sort.Slice(entries, func(i, j int) bool { return entries[i].FilePath < entries[j].FilePath })
 	}
-	fmt.Printf("Found %d FLAC file(s); checking %d.\n", len(entries), limit)
 	lastSave := time.Now()
 	checked := 0
 	for i := 0; i < limit; i++ {
@@ -137,6 +145,8 @@ func check(ctx context.Context, opts options) (resultErr error) {
 	return nil
 }
 
+// selectionLimit returns how many entries to check, taking them from the
+// start of entries, which must be sorted by check date, oldest first.
 func selectionLimit(entries []integrity.Entry, opts options, now time.Time) int {
 	limit := 0
 	if opts.age.set {
@@ -145,22 +155,38 @@ func selectionLimit(entries []integrity.Entry, opts options, now time.Time) int 
 		case -1:
 			cutoff = integrity.DateUndefined
 		case -2:
-			y, m, d := now.Date()
-			cutoff = time.Date(y, m, d, 0, 0, 0, 0, now.Location())
+			cutoff = startOfDay(now)
 		default:
 			cutoff = now.Add(-time.Duration(opts.age.value) * time.Minute)
 		}
-		limit = sort.Search(len(entries), func(i int) bool { return entries[i].DateChecked.After(cutoff) })
+		limit = len(entries) - checkedSince(entries, cutoff)
+	}
+	// With --per-day, files already checked today count toward the percentages.
+	checkedToday := 0
+	if opts.perDay {
+		checkedToday = checkedSince(entries, startOfDay(now))
 	}
 	if opts.minPercent.set {
-		n := int(math.Ceil(float64(len(entries)) * float64(opts.minPercent.value) / 100))
+		n := int(math.Ceil(float64(len(entries))*float64(opts.minPercent.value)/100)) - checkedToday
 		limit = max(limit, n)
 	}
 	if opts.maxPercent.set {
-		n := int(math.Floor(float64(len(entries)) * float64(opts.maxPercent.value) / 100))
-		limit = min(limit, n)
+		n := int(math.Floor(float64(len(entries))*float64(opts.maxPercent.value)/100)) - checkedToday
+		limit = max(min(limit, n), 0)
 	}
 	return limit
+}
+
+// checkedSince returns how many entries were last checked after t; entries
+// must be sorted by check date, oldest first.
+func checkedSince(entries []integrity.Entry, t time.Time) int {
+	return len(entries) - sort.Search(len(entries), func(i int) bool { return entries[i].DateChecked.After(t) })
+}
+
+// startOfDay returns midnight at the start of t's day, in t's time zone.
+func startOfDay(t time.Time) time.Time {
+	y, m, d := t.Date()
+	return time.Date(y, m, d, 0, 0, 0, 0, t.Location())
 }
 
 func mergeReportAndFiles(report, files []integrity.Entry) []integrity.Entry {

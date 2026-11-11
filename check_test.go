@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -120,6 +121,83 @@ func TestSelectionLimit(t *testing.T) {
 	}
 	if got := selectionLimit(entries, options{age: given(0), maxPercent: given(33)}, now); got != 0 {
 		t.Fatalf("maximum: %d", got)
+	}
+}
+
+func TestSelectionLimitPerDay(t *testing.T) {
+	now := time.Date(2024, 1, 3, 12, 0, 0, 0, time.FixedZone("test", 3600))
+	yesterday, today := now.Add(-24*time.Hour), now.Add(-time.Hour)
+	// 20 files sorted oldest first: 4 never checked, 10 checked yesterday, 6 today.
+	var entries []integrity.Entry
+	for i := 0; i < 20; i++ {
+		date := &integrity.DateUndefined
+		if i >= 4 {
+			date = &yesterday
+		}
+		if i >= 14 {
+			date = &today
+		}
+		entries = append(entries, integrity.Entry{DateChecked: date})
+	}
+	for _, tc := range []struct {
+		name string
+		opts options
+		want int
+	}{
+		{"35% without --per-day", options{minPercent: given(35)}, 7},
+		{"35% per day, 6 done", options{minPercent: given(35), perDay: true}, 1},
+		{"30% per day, already reached", options{minPercent: given(30), perDay: true}, 0},
+		{"25% per day, exceeded", options{minPercent: given(25), perDay: true}, 0},
+		{"age keeps its own count", options{age: given(-1), minPercent: given(25), perDay: true}, 4},
+		{"max 50% per day", options{age: given(-2), maxPercent: given(50), perDay: true}, 4},
+		{"max 25% per day, exceeded", options{age: given(-2), maxPercent: given(25), perDay: true}, 0},
+	} {
+		if got := selectionLimit(entries, tc.opts, now); got != tc.want {
+			t.Errorf("%s: got %d, want %d", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestPerDayCompletesInterruptedRun(t *testing.T) {
+	dir := t.TempDir()
+	report := filepath.Join(dir, "report.csv")
+	for i := 0; i < 10; i++ {
+		if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("%02d.flac", i)), []byte("x"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("FLIC_FAKE_FLAC", "ok")
+	checkedToday := func() int {
+		entries, err := (&integrity.Report{FilePath: report, Separator: ';'}).Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := 0
+		for _, e := range entries {
+			if !e.DateChecked.Before(startOfDay(time.Now())) {
+				n++
+			}
+		}
+		return n
+	}
+	run := func(minPercent int, perDay bool) {
+		opts := testOptions(os.Args[0], dir, report, minPercent)
+		opts.perDay = perDay
+		if err := check(context.Background(), opts); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run(20, false) // a run stopped after 20% of the collection
+	if got := checkedToday(); got != 2 {
+		t.Fatalf("after the first run: %d checked today, want 2", got)
+	}
+	run(50, true) // completes the daily 50%
+	if got := checkedToday(); got != 5 {
+		t.Fatalf("after completing: %d checked today, want 5", got)
+	}
+	run(50, true) // target already reached: checks nothing
+	if got := checkedToday(); got != 5 {
+		t.Fatalf("after a further run: %d checked today, want 5", got)
 	}
 }
 

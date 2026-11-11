@@ -36,6 +36,7 @@ go build -o flic.exe .
 | `--age <number>`   | Select files by the age of their last check; see [Age values](#age-values) |
 | `--min-percentage <number>`  | Minimum percentage of collection to check |
 | `--max-percentage <number>`  | Maximum percentage of collection to check |
+| `--per-day` | Make percentages daily totals; see [Daily percentages](#daily-percentages) |
 | `--max-missing-percentage <number>` | Maximum percentage of report entries allowed to be missing (default: 50) |
 
 Use absolute paths for the executable, collection and report. For example, in PowerShell:
@@ -72,6 +73,12 @@ Percentages must be between 0 and 100. Minimum percentages are rounded up to a w
 
 * With `--min-percentage`, the program checks whichever is larger: the number selected by age or the minimum percentage.
 * With `--max-percentage`, it checks whichever is smaller: the number selected by age or the maximum percentage.
+
+### Daily percentages
+
+By default, each run checks the requested percentage again, even if files were already checked earlier the same day. With `--per-day`, percentages become daily totals: files already checked since midnight (local time) count toward them, and the run only checks the difference. `--per-day` requires `--min-percentage` or `--max-percentage`.
+
+For example, if a run with `--min-percentage=35 --per-day` is interrupted after checking 20% of the collection, running the same command again that day checks only the remaining 15%. Once 35% have been checked that day, further runs check nothing. The count starts again at midnight, so a run interrupted just before midnight and resumed after it checks a full 35%.
 
 ## Report
 

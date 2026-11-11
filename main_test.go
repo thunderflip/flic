@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"io"
 	"math"
 	"os"
@@ -11,11 +12,16 @@ import (
 	"time"
 )
 
-// TestMain applies to every test of package main. With FLIC_FAKE_FLAC=sleep,
-// the test binary stands in for a slow flac executable instead of running tests.
+// TestMain applies to every test of package main. With FLIC_FAKE_FLAC set, the
+// test binary stands in for the flac executable instead of running tests:
+// "sleep" behaves like a slow flac, "ok" like a successful verification.
 func TestMain(m *testing.M) {
-	if os.Getenv("FLIC_FAKE_FLAC") == "sleep" {
+	switch os.Getenv("FLIC_FAKE_FLAC") {
+	case "sleep":
 		time.Sleep(time.Minute)
+		os.Exit(0)
+	case "ok":
+		fmt.Println("track.flac: ok")
 		os.Exit(0)
 	}
 	os.Exit(m.Run())
@@ -77,11 +83,11 @@ func TestFlags(t *testing.T) {
 		defineFlags(fs, &opts)
 		return opts, fs.Parse(args)
 	}
-	opts, err := parse("--flac=f", "--folder=d", "--report=r", "--age=-2", "--max-percentage", "25")
+	opts, err := parse("--flac=f", "--folder=d", "--report=r", "--age=-2", "--max-percentage", "25", "--per-day")
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := options{flacPath: "f", folder: "d", report: "r", age: given(-2), maxPercent: given(25), maxMissingPercent: defaultMaxMissingPercentage}
+	want := options{flacPath: "f", folder: "d", report: "r", age: given(-2), maxPercent: given(25), perDay: true, maxMissingPercent: defaultMaxMissingPercentage}
 	if opts != want {
 		t.Fatalf("parsed %+v, want %+v", opts, want)
 	}
@@ -108,5 +114,24 @@ func TestHelpShowsNoInternalDefaults(t *testing.T) {
 	}
 	if strings.Count(text, "(default") != 1 || strings.Contains(text, "-2147483648") {
 		t.Errorf("help shows unexpected defaults:\n%s", text)
+	}
+}
+
+func TestPerDayRequiresPercentage(t *testing.T) {
+	opts := defaultOptions()
+	opts.flacPath, opts.folder, opts.report = "flac", "folder", "report"
+	opts.age, opts.perDay = given(-1), true
+	if err := validateOptions(opts); err == nil {
+		t.Fatal("accepted --per-day without a percentage")
+	}
+	for _, set := range []func(*options){
+		func(o *options) { o.minPercent = given(35) },
+		func(o *options) { o.maxPercent = given(35) },
+	} {
+		o := opts
+		set(&o)
+		if err := validateOptions(o); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

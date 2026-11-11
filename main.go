@@ -74,6 +74,7 @@ func defineFlags(fs *flag.FlagSet, opts *options) {
 	fs.Var(&opts.age, "age", "select files by the age of their last check, in `minutes` (-1: never checked, -2: before today)")
 	fs.Var(&opts.minPercent, "min-percentage", "minimum `percentage` of the collection to check")
 	fs.Var(&opts.maxPercent, "max-percentage", "maximum `percentage` of the collection to check (with --age)")
+	fs.BoolVar(&opts.perDay, "per-day", opts.perDay, "make percentages daily totals: files already checked today (since midnight) count toward them")
 	fs.IntVar(&opts.maxMissingPercent, "max-missing-percentage", opts.maxMissingPercent, "maximum `percentage` of report entries that may be missing")
 	fs.Usage = func() {
 		out := fs.Output()
@@ -120,6 +121,9 @@ func validateOptions(opts options) error {
 		if p.set && (p.value < 0 || p.value > 100) {
 			return errors.New("percentages must be between 0 and 100")
 		}
+	}
+	if opts.perDay && !opts.minPercent.set && !opts.maxPercent.set {
+		return errors.New("--per-day requires --min-percentage or --max-percentage")
 	}
 	if opts.maxMissingPercent < 0 || opts.maxMissingPercent > 100 {
 		return errors.New("--max-missing-percentage must be between 0 and 100")
