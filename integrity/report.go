@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -94,12 +95,18 @@ func (r *Report) Load() ([]Entry, error) {
 
 // Save atomically replaces the report with entries.
 func (r *Report) Save(entries []Entry) (err error) {
-	f, err := os.CreateTemp(filepath.Dir(r.FilePath), ".flic-report-*")
+	f, err := createTempFile(filepath.Dir(r.FilePath), ".flic-report-")
 	if err != nil {
 		return fmt.Errorf("create temporary report: %w", err)
 	}
 	name := f.Name()
 	defer func() { f.Close(); os.Remove(name) }()
+	// The temporary file replaces the report: keep the existing report's permissions.
+	if info, statErr := os.Stat(r.FilePath); statErr == nil {
+		if err = f.Chmod(info.Mode().Perm()); err != nil {
+			return fmt.Errorf("copy report permissions: %w", err)
+		}
+	}
 	writer := csv.NewWriter(f)
 	writer.Comma = r.Separator
 	if err = writer.Write([]string{columnFile, columnSize, columnModTime, columnLastCheck}); err != nil {
@@ -132,6 +139,19 @@ func (r *Report) Save(entries []Entry) (err error) {
 		return fmt.Errorf("replace report: %w", err)
 	}
 	return nil
+}
+
+// createTempFile is like os.CreateTemp, but the file is created with mode 0666
+// filtered by the umask, as a regular new file would be, rather than 0600.
+func createTempFile(dir, prefix string) (*os.File, error) {
+	for range 100 {
+		name := filepath.Join(dir, prefix+strconv.FormatUint(rand.Uint64(), 36))
+		f, err := os.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0666)
+		if !errors.Is(err, os.ErrExist) {
+			return f, err
+		}
+	}
+	return nil, fmt.Errorf("no unused temporary name in %q", dir)
 }
 
 func parseUnixUTC(value string) (time.Time, error) {

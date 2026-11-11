@@ -106,3 +106,20 @@ func TestReportUsesLocalCheckDates(t *testing.T) {
 		t.Fatalf("unexpected check dates: %v, %v", read[0].DateChecked, read[1].DateChecked)
 	}
 }
+
+func TestSaveLeavesNoTemporaryFiles(t *testing.T) {
+	dir := t.TempDir()
+	r := Report{FilePath: filepath.Join(dir, "report.csv"), Separator: ';'}
+	for range 3 {
+		if err := r.Save([]Entry{{FilePath: "a.flac", DateChecked: &DateUndefined}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0].Name() != "report.csv" {
+		t.Fatalf("unexpected files: %v", files)
+	}
+}

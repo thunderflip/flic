@@ -83,13 +83,15 @@ The program detects new or modified files using their paths, sizes and modificat
 
 ### Saving and verification errors
 
-The report is saved every 3 minutes, after a file finishes checking, and again at the end. A temporary file is written before the report is replaced.
+The report is saved every 3 minutes, after a file finishes checking, and again at the end. A temporary file is written before the report is replaced. On Linux and macOS, the report keeps its permissions; a new report gets the usual permissions for new files (according to the umask).
 
 If FLAC reports an error or cannot verify the stored MD5, the program stops at that file and saves completed checks before exiting with an error. An existing earlier check date for the failed file is currently retained.
 
 ### Interrupting a run
 
-Pressing Ctrl+C stops the run cleanly. So does a termination request (SIGTERM, or closing the console window on Windows). The file being verified is abandoned and is not marked as checked, completed checks are saved, the lock is released, and the program exits with status 130. If the interruption occurs while the collection is being scanned, the report is left unchanged. Pressing Ctrl+C a second time terminates the program immediately, without saving and leaving the lock in place.
+Pressing Ctrl+C stops the run cleanly. So do a termination request (SIGTERM, or closing the console window on Windows) and, on Linux and macOS, closing the terminal or SSH session (SIGHUP). The file being verified is abandoned and is not marked as checked, completed checks are saved, the lock is released, and the program exits with status 130. If the interruption occurs while the collection is being scanned, the report is left unchanged. Pressing Ctrl+C a second time terminates the program immediately, without saving and leaving the lock in place.
+
+A run started with `nohup` keeps ignoring SIGHUP and continues after the session closes.
 
 ### Concurrent runs
 

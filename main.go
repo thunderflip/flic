@@ -12,7 +12,6 @@ import (
 	"runtime"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/thunderflip/flic-go/integrity"
@@ -27,6 +26,20 @@ const optionNotSet = math.MinInt32
 const exitInterrupted = 130
 
 var errInterrupted = errors.New("interrupted")
+
+// interruptSignals lists the signals that stop a run cleanly: Ctrl+C, termination
+// requests (including closing the console window on Windows), and the hangup sent
+// when a Unix terminal or SSH session closes. Signals that were ignored when flic
+// started (for example SIGHUP under nohup) stay ignored.
+func interruptSignals() []os.Signal {
+	var signals []os.Signal
+	for _, sig := range candidateInterruptSignals {
+		if !signal.Ignored(sig) {
+			signals = append(signals, sig)
+		}
+	}
+	return signals
+}
 
 func mergeReportAndFiles(report, files []integrity.Entry) []integrity.Entry {
 	old := make(map[string]integrity.Entry, len(report))
@@ -71,7 +84,11 @@ func run() int {
 		fmt.Fprintln(os.Stderr, "Error:", err)
 		return 2
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := context.Background(), func() {}
+	// With an empty list, NotifyContext would capture every signal.
+	if signals := interruptSignals(); len(signals) > 0 {
+		ctx, stop = signal.NotifyContext(context.Background(), signals...)
+	}
 	defer stop()
 	// Deferred calls run in reverse order: done is closed before stop cancels ctx.
 	done := make(chan struct{})
