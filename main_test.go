@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/thunderflip/flic-go/integrity"
+	"github.com/thunderflip/flic/integrity"
 )
 
 func TestPathComparisonPreservesHistory(t *testing.T) {

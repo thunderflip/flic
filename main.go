@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/thunderflip/flic-go/integrity"
+	"github.com/thunderflip/flic/integrity"
 )
 
 const modtimeTolerance = time.Millisecond

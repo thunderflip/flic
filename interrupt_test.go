@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/thunderflip/flic-go/integrity"
+	"github.com/thunderflip/flic/integrity"
 )
 
 // fakeFlacModes lets the test binary stand in for the flac executable: when
