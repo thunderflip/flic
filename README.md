@@ -18,6 +18,7 @@ This check compares the audio data with the hash stored in the same file. It is 
 
 - Go 1.27.3 or later to build the program.
 - The `flac` executable; its full path is provided with `--flac`.
+- Windows, Linux, macOS or BSD.
 
 Build from the project directory:
 

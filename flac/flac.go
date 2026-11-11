@@ -1,4 +1,5 @@
-package main
+// Package flac runs the FLAC command-line tools.
+package flac
 
 import (
 	"context"
@@ -15,11 +16,17 @@ var (
 	testOKPattern   = regexp.MustCompile(`(?:^|:|\x08|\r)\s*ok\s*$`)
 )
 
-type FlacOperation struct{ flacPath, metaflacPath, filePath string }
+// Operation runs the flac and metaflac tools on one file.
+type Operation struct {
+	FlacPath     string // path to the flac executable
+	MetaflacPath string // path to the metaflac executable
+	FilePath     string // FLAC file to process
+}
 
-func (f *FlacOperation) GetHash() (string, error) {
-	arg := []string{"--show-md5sum", f.filePath}
-	output, err := exec.Command(f.metaflacPath, arg...).Output()
+// GetHash returns the MD5 signature stored in the file, using metaflac.
+func (f *Operation) GetHash() (string, error) {
+	arg := []string{"--show-md5sum", f.FilePath}
+	output, err := exec.Command(f.MetaflacPath, arg...).Output()
 	if err != nil {
 		log.Printf("Error running metaflac: %v", err)
 		return "", err
@@ -42,9 +49,10 @@ func parseFlacHash(output string) (string, error) {
 	return hash, nil
 }
 
-func (f *FlacOperation) Reencode() (bool, error) {
-	args := []string{"--force", "--no-error-on-compression-fail", "--verify", f.filePath}
-	out, err := exec.Command(f.flacPath, args...).CombinedOutput()
+// Reencode re-encodes the file in place with flac and verifies the result.
+func (f *Operation) Reencode() (bool, error) {
+	args := []string{"--force", "--no-error-on-compression-fail", "--verify", f.FilePath}
+	out, err := exec.Command(f.FlacPath, args...).CombinedOutput()
 	if err != nil {
 		log.Printf("Error running flac: %v", err)
 		return false, err
@@ -67,8 +75,9 @@ func (f *FlacOperation) Reencode() (bool, error) {
 	return true, nil
 }
 
-func (f *FlacOperation) Test(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, f.flacPath, "--test", f.filePath)
+// Test decodes the file with flac and checks its stored MD5 signature.
+func (f *Operation) Test(ctx context.Context) error {
+	cmd := exec.CommandContext(ctx, f.FlacPath, "--test", f.FilePath)
 	// flac must not receive the user's Ctrl+C itself: otherwise it may die before
 	// flic notices the interruption, and the run would be reported as a failed
 	// verification. flic stops flac through ctx instead.

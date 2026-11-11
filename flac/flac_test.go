@@ -1,4 +1,4 @@
-package main
+package flac
 
 import (
 	"context"
@@ -6,6 +6,19 @@ import (
 	"path/filepath"
 	"testing"
 )
+
+// fakeFlacModes lets the test binary stand in for the flac executable: when
+// FLIC_FAKE_FLAC names a mode, that mode runs instead of the tests.
+// Platform-specific test files register modes in init.
+var fakeFlacModes = map[string]func(){}
+
+func TestMain(m *testing.M) {
+	if mode := os.Getenv("FLIC_FAKE_FLAC"); mode != "" {
+		fakeFlacModes[mode]()
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
 
 func TestParseFlacHash(t *testing.T) {
 	const hash = "84533df17b03dd13cbe3f2d2f1f26361"
@@ -31,7 +44,7 @@ func TestGetHashIntegration(t *testing.T) {
 	if metaflac == "" || file == "" {
 		t.Skip("set FLIC_TEST_METAFLAC and FLIC_TEST_FILE to run")
 	}
-	op := FlacOperation{metaflacPath: metaflac, filePath: file}
+	op := Operation{MetaflacPath: metaflac, FilePath: file}
 	hash, err := op.GetHash()
 	if err != nil {
 		t.Fatal(err)
@@ -68,7 +81,7 @@ func TestFlacTestOutputOK(t *testing.T) {
 }
 
 func TestFlacTestCommandFailure(t *testing.T) {
-	op := FlacOperation{flacPath: filepath.Join(t.TempDir(), "missing-flac"), filePath: "track.flac"}
+	op := Operation{FlacPath: filepath.Join(t.TempDir(), "missing-flac"), FilePath: "track.flac"}
 	if err := op.Test(context.Background()); err == nil {
 		t.Fatal("expected command failure")
 	}

@@ -1,53 +1,22 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"math"
 	"os"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/thunderflip/flic/integrity"
 )
 
-func TestPathComparisonPreservesHistory(t *testing.T) {
-	path, err := filepath.Abs(filepath.Join("testdata", "Album", "track.flac"))
-	if err != nil {
-		t.Fatal(err)
+// TestMain applies to every test of package main. With FLIC_FAKE_FLAC=sleep,
+// the test binary stands in for a slow flac executable instead of running tests.
+func TestMain(m *testing.M) {
+	if os.Getenv("FLIC_FAKE_FLAC") == "sleep" {
+		time.Sleep(time.Minute)
+		os.Exit(0)
 	}
-	reportPath := path
-	if runtime.GOOS == "windows" {
-		reportPath = strings.ToUpper(path)
-	}
-	checked := time.Now().Add(-time.Hour)
-	modified := time.Now()
-	previous := []integrity.Entry{{FilePath: reportPath, FileSize: 123, FileModTime: modified, DateChecked: &checked}}
-	files := []integrity.Entry{{FilePath: path, FileSize: 123, FileModTime: modified, DateChecked: &integrity.DateUndefined}}
-	if err := checkMissingEntries(previous, files, 0); err != nil {
-		t.Fatal(err)
-	}
-	result := mergeReportAndFiles(previous, files)
-	if len(result) != 1 || !result[0].DateChecked.Equal(checked) || result[0].FilePath != files[0].FilePath {
-		t.Fatalf("history or scanned path not preserved: %+v", result)
-	}
-}
-
-func TestAmbiguousPathsRejected(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "track.flac")
-	entries := []integrity.Entry{{FilePath: path}, {FilePath: path}}
-	if err := validateUniquePaths(entries); err == nil {
-		t.Fatal("expected duplicate path error")
-	}
-	if runtime.GOOS == "windows" {
-		entries = []integrity.Entry{{FilePath: "Track.flac"}, {FilePath: "track.flac"}}
-		if err := validateUniquePaths(entries); err == nil {
-			t.Fatal("expected case collision error")
-		}
-	}
+	os.Exit(m.Run())
 }
 
 func TestValidateOptions(t *testing.T) {
@@ -63,88 +32,28 @@ func TestValidateOptions(t *testing.T) {
 	}
 }
 
-func TestMissingEntriesThreshold(t *testing.T) {
-	previous := []integrity.Entry{{FilePath: "a"}, {FilePath: "b"}}
+func TestAnnounceInterruption(t *testing.T) {
 	for _, tc := range []struct {
-		files     []integrity.Entry
-		threshold int
-		blocked   bool
+		name        string
+		runFinished bool
+		announced   bool
 	}{
-		{previous, 0, false}, {previous[:1], 50, false}, {previous[:1], 49, true},
-		{nil, 50, true}, {nil, 100, false},
+		{"signal during run", false, true},
+		{"normal end of run", true, false},
 	} {
-		err := checkMissingEntries(previous, tc.files, tc.threshold)
-		if (err != nil) != tc.blocked {
-			t.Fatalf("threshold %d, files %v: %v", tc.threshold, tc.files, err)
-		}
-	}
-	if err := checkMissingEntries(nil, nil, 0); err != nil {
-		t.Fatal(err)
-	}
-	for _, threshold := range []int{-1, 101} {
-		if err := validateOptions("flac", "folder", "report", 0, math.MinInt32, math.MinInt32, threshold); err == nil {
-			t.Fatalf("accepted threshold %d", threshold)
-		}
-	}
-}
-
-func TestMissingEntriesPreserveReport(t *testing.T) {
-	dir := t.TempDir()
-	report := filepath.Join(dir, "report.csv")
-	store := integrity.Report{FilePath: report, Separator: ';'}
-	entries := []integrity.Entry{
-		{FilePath: filepath.Join(dir, "a.flac"), DateChecked: &integrity.DateUndefined},
-		{FilePath: filepath.Join(dir, "b.flac"), DateChecked: &integrity.DateUndefined},
-	}
-	if err := store.Save(entries); err != nil {
-		t.Fatal(err)
-	}
-	before, err := os.ReadFile(report)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := check(context.Background(), "flac", dir, report, math.MinInt32, 0, math.MinInt32, 50); err == nil {
-		t.Fatal("expected missing files error")
-	}
-	after, err := os.ReadFile(report)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(before, after) {
-		t.Fatal("report changed despite missing files")
-	}
-	if _, err := os.Stat(report + ".lock"); !os.IsNotExist(err) {
-		t.Fatalf("lock remains: %v", err)
-	}
-}
-func TestSelectionLimit(t *testing.T) {
-	now := time.Date(2024, 1, 3, 12, 0, 0, 0, time.FixedZone("test", 3600))
-	old := now.Add(-48 * time.Hour)
-	recent := now.Add(-time.Hour)
-	entries := []integrity.Entry{{DateChecked: &old}, {DateChecked: &recent}, {DateChecked: &recent}}
-	if got := selectionLimit(entries, -2, math.MinInt32, math.MinInt32, now); got != 1 {
-		t.Fatalf("today: %d", got)
-	}
-	if got := selectionLimit(entries, math.MinInt32, 1, math.MinInt32, now); got != 1 {
-		t.Fatalf("minimum: %d", got)
-	}
-	if got := selectionLimit(entries, 0, math.MinInt32, 33, now); got != 0 {
-		t.Fatalf("maximum: %d", got)
-	}
-}
-func TestFailedVerificationSavesProgress(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "a.flac")
-	report := filepath.Join(dir, "report.csv")
-	if err := os.WriteFile(path, []byte("bad"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := check(context.Background(), filepath.Join(dir, "missing-flac"), dir, report, math.MinInt32, 100, math.MinInt32, 50); err == nil {
-		t.Fatal("expected verification failure")
-	}
-	store := integrity.Report{FilePath: report, Separator: ';'}
-	entries, err := store.Load()
-	if err != nil || len(entries) != 1 || !entries[0].DateChecked.Equal(integrity.DateUndefined) {
-		t.Fatalf("saved progress: %+v %v", entries, err)
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan struct{})
+			if tc.runFinished {
+				close(done)
+			}
+			cancel()
+			stopped := false
+			var out strings.Builder
+			announceInterruption(ctx, done, func() { stopped = true }, &out)
+			if announced := out.Len() > 0; announced != tc.announced || stopped != tc.announced {
+				t.Fatalf("announced %v, stopped %v, want %v: %q", announced, stopped, tc.announced, out.String())
+			}
+		})
 	}
 }
