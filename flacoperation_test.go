@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -68,7 +69,7 @@ func TestFlacTestOutputOK(t *testing.T) {
 
 func TestFlacTestCommandFailure(t *testing.T) {
 	op := FlacOperation{flacPath: filepath.Join(t.TempDir(), "missing-flac"), filePath: "track.flac"}
-	if err := op.Test(); err == nil {
+	if err := op.Test(context.Background()); err == nil {
 		t.Fatal("expected command failure")
 	}
 }

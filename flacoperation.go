@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os/exec"
@@ -66,8 +67,13 @@ func (f *FlacOperation) Reencode() (bool, error) {
 	return true, nil
 }
 
-func (f *FlacOperation) Test() error {
-	output, err := exec.Command(f.flacPath, "--test", f.filePath).CombinedOutput()
+func (f *FlacOperation) Test(ctx context.Context) error {
+	cmd := exec.CommandContext(ctx, f.flacPath, "--test", f.filePath)
+	// flac must not receive the user's Ctrl+C itself: otherwise it may die before
+	// flic notices the interruption, and the run would be reported as a failed
+	// verification. flic stops flac through ctx instead.
+	isolateFromTerminalSignals(cmd)
+	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("run flac: %w: %s", err, strings.TrimSpace(string(output)))
 	}

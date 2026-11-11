@@ -87,9 +87,13 @@ The report is saved every 3 minutes, after a file finishes checking, and again a
 
 If FLAC reports an error or cannot verify the stored MD5, the program stops at that file and saves completed checks before exiting with an error. An existing earlier check date for the failed file is currently retained.
 
+### Interrupting a run
+
+Pressing Ctrl+C stops the run cleanly. So does a termination request (SIGTERM, or closing the console window on Windows). The file being verified is abandoned and is not marked as checked, completed checks are saved, the lock is released, and the program exits with status 130. If the interruption occurs while the collection is being scanned, the report is left unchanged. Pressing Ctrl+C a second time terminates the program immediately, without saving and leaving the lock in place.
+
 ### Concurrent runs
 
-While a report is in use, a `<report>.lock` file prevents another instance from using the same report. It records the machine, process ID, and start time. After an abrupt interruption the lock may remain; check that no process is using the report before removing it manually. This protection requires all instances to use the same lock path and a filesystem that supports exclusive file creation.
+While a report is in use, a `<report>.lock` file prevents another instance from using the same report. It records the machine, process ID, and start time. After an abrupt termination (crash, power loss, forced kill) the lock may remain; check that no process is using the report before removing it manually. This protection requires all instances to use the same lock path and a filesystem that supports exclusive file creation.
 
 ### Missing files
 
@@ -99,7 +103,7 @@ If more than `--max-missing-percentage` percent of report entries are missing, t
 
 ## Exit status
 
-Exit status is 0 for success, 2 for invalid options, and 1 for other errors.
+Exit status is 0 for success, 2 for invalid options, 130 when the run was interrupted, and 1 for other errors.
 
 ## License
 

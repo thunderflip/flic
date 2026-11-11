@@ -1,6 +1,7 @@
 package integrity
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"path/filepath"
@@ -11,11 +12,14 @@ import (
 type Directory struct{ DirPath string }
 
 // Scan lists the regular .flac files under DirPath; new entries are never checked.
-func (dir Directory) Scan() ([]Entry, error) {
+func (dir Directory) Scan(ctx context.Context) ([]Entry, error) {
 	var results []Entry
 	err := filepath.WalkDir(dir.DirPath, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
+		}
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 		if d.IsDir() || !strings.EqualFold(filepath.Ext(d.Name()), ".flac") {
 			return nil

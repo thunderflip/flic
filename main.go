@@ -1,14 +1,18 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"math"
 	"os"
+	"os/signal"
 	"runtime"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/thunderflip/flic-go/integrity"
@@ -18,6 +22,11 @@ const modtimeTolerance = time.Millisecond
 const autosaveInterval = 3 * time.Minute
 const defaultMaxMissingPercentage = 50
 const optionNotSet = math.MinInt32
+
+// exitInterrupted follows the shell convention for a run stopped by Ctrl+C (128 + SIGINT).
+const exitInterrupted = 130
+
+var errInterrupted = errors.New("interrupted")
 
 func mergeReportAndFiles(report, files []integrity.Entry) []integrity.Entry {
 	old := make(map[string]integrity.Entry, len(report))
@@ -62,11 +71,39 @@ func run() int {
 		fmt.Fprintln(os.Stderr, "Error:", err)
 		return 2
 	}
-	if err := check(*flac, *folder, *report, *age, *minPercent, *maxPercent, *maxMissingPercent); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	// Deferred calls run in reverse order: done is closed before stop cancels ctx.
+	done := make(chan struct{})
+	defer close(done)
+	go announceInterruption(ctx, done, stop, os.Stderr)
+	if err := check(ctx, *flac, *folder, *report, *age, *minPercent, *maxPercent, *maxMissingPercent); err != nil {
 		fmt.Fprintln(os.Stderr, "Error:", err)
+		if errors.Is(err, errInterrupted) {
+			return exitInterrupted
+		}
 		return 1
 	}
 	return 0
+}
+
+// announceInterruption waits for an interruption signal (ctx cancelled), then
+// restores default signal handling, so that a second Ctrl+C terminates
+// immediately, and tells the user that progress is being saved. It stays silent
+// when ctx is only cancelled because the run is over (done already closed).
+func announceInterruption(ctx context.Context, done <-chan struct{}, stop func(), w io.Writer) {
+	select {
+	case <-done:
+		return
+	case <-ctx.Done():
+	}
+	select {
+	case <-done:
+		return
+	default:
+	}
+	stop()
+	fmt.Fprintln(w, "Interruption requested; saving progress and releasing the report lock...")
 }
 
 func validateOptions(flac, folder, report string, age, minPercent, maxPercent, maxMissingPercent int) error {
@@ -119,7 +156,7 @@ func selectionLimit(entries []integrity.Entry, age, minPercent, maxPercent int, 
 	return limit
 }
 
-func check(flac, folder, report string, age, minPercent, maxPercent, maxMissingPercent int) (resultErr error) {
+func check(ctx context.Context, flac, folder, report string, age, minPercent, maxPercent, maxMissingPercent int) (resultErr error) {
 	start := time.Now()
 	lock, err := acquireReportLock(report)
 	if err != nil {
@@ -131,8 +168,11 @@ func check(flac, folder, report string, age, minPercent, maxPercent, maxMissingP
 	if err != nil {
 		return err
 	}
-	files, err := (integrity.Directory{DirPath: folder}).Scan()
+	files, err := (integrity.Directory{DirPath: folder}).Scan(ctx)
 	if err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("%w during scan; report was not modified", errInterrupted)
+		}
 		return err
 	}
 	if err := validateUniquePaths(previous); err != nil {
@@ -154,10 +194,17 @@ func check(flac, folder, report string, age, minPercent, maxPercent, maxMissingP
 	lastSave := time.Now()
 	checked := 0
 	for i := 0; i < limit; i++ {
+		if ctx.Err() != nil {
+			return interrupted(store, entries, checked)
+		}
 		path := entries[i].FilePath
 		fmt.Printf("Verifying (%d/%d): %s\n", i+1, limit, path)
 		operation := FlacOperation{flacPath: flac, filePath: path}
-		if err := operation.Test(); err != nil {
+		if err := operation.Test(ctx); err != nil {
+			if ctx.Err() != nil {
+				// flac was stopped by the interruption: the file was not verified.
+				return interrupted(store, entries, checked)
+			}
 			saveErr := store.Save(entries)
 			return errors.Join(fmt.Errorf("verify %q: %w", path, err), saveErr)
 		}
@@ -176,6 +223,13 @@ func check(flac, folder, report string, age, minPercent, maxPercent, maxMissingP
 	}
 	fmt.Printf("Checked %d file(s) in %s.\n", checked, time.Since(start).Round(time.Millisecond))
 	return nil
+}
+
+func interrupted(store integrity.Report, entries []integrity.Entry, checked int) error {
+	if err := store.Save(entries); err != nil {
+		return errors.Join(errInterrupted, err)
+	}
+	return fmt.Errorf("%w after checking %d file(s); progress saved", errInterrupted, checked)
 }
 
 func validateUniquePaths(entries []integrity.Entry) error {

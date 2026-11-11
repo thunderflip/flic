@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"math"
 	"os"
 	"path/filepath"
@@ -102,7 +103,7 @@ func TestMissingEntriesPreserveReport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := check("flac", dir, report, math.MinInt32, 0, math.MinInt32, 50); err == nil {
+	if err := check(context.Background(), "flac", dir, report, math.MinInt32, 0, math.MinInt32, 50); err == nil {
 		t.Fatal("expected missing files error")
 	}
 	after, err := os.ReadFile(report)
@@ -138,7 +139,7 @@ func TestFailedVerificationSavesProgress(t *testing.T) {
 	if err := os.WriteFile(path, []byte("bad"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := check(filepath.Join(dir, "missing-flac"), dir, report, math.MinInt32, 100, math.MinInt32, 50); err == nil {
+	if err := check(context.Background(), filepath.Join(dir, "missing-flac"), dir, report, math.MinInt32, 100, math.MinInt32, 50); err == nil {
 		t.Fatal("expected verification failure")
 	}
 	store := integrity.Report{FilePath: report, Separator: ';'}
