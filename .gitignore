@@ -1,1 +1,8 @@
 /.vscode
+
+# Local build and run files
+*.exe
+flic.bat
+
+# Audio samples
+*.flac
