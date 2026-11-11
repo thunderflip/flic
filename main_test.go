@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"math"
 	"os"
 	"strings"
 	"testing"
@@ -20,12 +19,14 @@ func TestMain(m *testing.M) {
 }
 
 func TestValidateOptions(t *testing.T) {
-	unset := math.MinInt32
+	unset := optionNotSet
 	for _, tc := range []struct {
 		age, min, max int
 		valid         bool
 	}{{unset, unset, unset, false}, {unset, unset, 10, false}, {0, unset, 10, true}, {unset, 1, unset, true}, {-3, unset, unset, false}, {0, 101, unset, false}, {0, 0, unset, true}, {0, 1, 1, false}} {
-		err := validateOptions("flac", "folder", "report", tc.age, tc.min, tc.max, 50)
+		opts := selection(tc.age, tc.min, tc.max)
+		opts.flacPath, opts.folder, opts.report = "flac", "folder", "report"
+		err := validateOptions(opts)
 		if (err == nil) != tc.valid {
 			t.Fatalf("%+v: %v", tc, err)
 		}

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -70,7 +69,9 @@ func TestMissingEntriesThreshold(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, threshold := range []int{-1, 101} {
-		if err := validateOptions("flac", "folder", "report", 0, math.MinInt32, math.MinInt32, threshold); err == nil {
+		opts := testOptions("flac", "folder", "report", optionNotSet)
+		opts.age, opts.maxMissingPercent = 0, threshold
+		if err := validateOptions(opts); err == nil {
 			t.Fatalf("accepted threshold %d", threshold)
 		}
 	}
@@ -91,7 +92,7 @@ func TestMissingEntriesPreserveReport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := check(context.Background(), "flac", dir, report, math.MinInt32, 0, math.MinInt32, 50); err == nil {
+	if err := check(context.Background(), testOptions("flac", dir, report, 0)); err == nil {
 		t.Fatal("expected missing files error")
 	}
 	after, err := os.ReadFile(report)
@@ -111,13 +112,13 @@ func TestSelectionLimit(t *testing.T) {
 	old := now.Add(-48 * time.Hour)
 	recent := now.Add(-time.Hour)
 	entries := []integrity.Entry{{DateChecked: &old}, {DateChecked: &recent}, {DateChecked: &recent}}
-	if got := selectionLimit(entries, -2, math.MinInt32, math.MinInt32, now); got != 1 {
+	if got := selectionLimit(entries, selection(-2, optionNotSet, optionNotSet), now); got != 1 {
 		t.Fatalf("today: %d", got)
 	}
-	if got := selectionLimit(entries, math.MinInt32, 1, math.MinInt32, now); got != 1 {
+	if got := selectionLimit(entries, selection(optionNotSet, 1, optionNotSet), now); got != 1 {
 		t.Fatalf("minimum: %d", got)
 	}
-	if got := selectionLimit(entries, 0, math.MinInt32, 33, now); got != 0 {
+	if got := selectionLimit(entries, selection(0, optionNotSet, 33), now); got != 0 {
 		t.Fatalf("maximum: %d", got)
 	}
 }
@@ -129,7 +130,7 @@ func TestFailedVerificationSavesProgress(t *testing.T) {
 	if err := os.WriteFile(path, []byte("bad"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := check(context.Background(), filepath.Join(dir, "missing-flac"), dir, report, math.MinInt32, 100, math.MinInt32, 50); err == nil {
+	if err := check(context.Background(), testOptions(filepath.Join(dir, "missing-flac"), dir, report, 100)); err == nil {
 		t.Fatal("expected verification failure")
 	}
 	store := integrity.Report{FilePath: report, Separator: ';'}
@@ -144,7 +145,7 @@ func TestInterruptDuringScanLeavesReportUntouched(t *testing.T) {
 	report := filepath.Join(dir, "report.csv")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	err := check(ctx, "flac", dir, report, math.MinInt32, 100, math.MinInt32, 50)
+	err := check(ctx, testOptions("flac", dir, report, 100))
 	if !errors.Is(err, errInterrupted) {
 		t.Fatalf("expected interruption, got %v", err)
 	}
@@ -166,7 +167,7 @@ func TestInterruptDuringVerificationSavesProgress(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	err := check(ctx, os.Args[0], dir, report, math.MinInt32, 100, math.MinInt32, 50)
+	err := check(ctx, testOptions(os.Args[0], dir, report, 100))
 	if !errors.Is(err, errInterrupted) {
 		t.Fatalf("expected interruption, got %v", err)
 	}
@@ -181,4 +182,19 @@ func TestInterruptDuringVerificationSavesProgress(t *testing.T) {
 	if _, err := os.Stat(report + ".lock"); !os.IsNotExist(err) {
 		t.Fatalf("lock remains: %v", err)
 	}
+}
+
+// testOptions returns default options for a run on folder that checks at
+// least minPercent of the collection.
+func testOptions(flacPath, folder, report string, minPercent int) options {
+	opts := defaultOptions()
+	opts.flacPath, opts.folder, opts.report, opts.minPercent = flacPath, folder, report, minPercent
+	return opts
+}
+
+// selection returns default options with the given file selection.
+func selection(age, minPercent, maxPercent int) options {
+	opts := defaultOptions()
+	opts.age, opts.minPercent, opts.maxPercent = age, minPercent, maxPercent
+	return opts
 }

@@ -13,10 +13,6 @@ import (
 	"time"
 )
 
-const defaultMaxMissingPercentage = 50
-
-const optionNotSet = math.MinInt32
-
 // exitInterrupted follows the shell convention for a run stopped by Ctrl+C (128 + SIGINT).
 const exitInterrupted = 130
 
@@ -38,19 +34,20 @@ func interruptSignals() []os.Signal {
 func main() { os.Exit(run()) }
 
 func run() int {
-	flacPath := flag.String("flac", "", "Path to the flac executable")
-	folder := flag.String("folder", "", "Root folder path to FLAC collection")
-	report := flag.String("report", "", "Path to the report file")
-	age := flag.Int("age", optionNotSet, "Age in minutes (-1: never checked, -2: before today)")
-	minPercent := flag.Int("min-percentage", optionNotSet, "Minimum percentage of collection to check")
-	maxPercent := flag.Int("max-percentage", optionNotSet, "Maximum percentage of collection to check")
-	maxMissingPercent := flag.Int("max-missing-percentage", defaultMaxMissingPercentage, "Maximum percentage of report entries that may be missing")
+	opts := defaultOptions()
+	flag.StringVar(&opts.flacPath, "flac", opts.flacPath, "Path to the flac executable")
+	flag.StringVar(&opts.folder, "folder", opts.folder, "Root folder path to FLAC collection")
+	flag.StringVar(&opts.report, "report", opts.report, "Path to the report file")
+	flag.IntVar(&opts.age, "age", opts.age, "Age in minutes (-1: never checked, -2: before today)")
+	flag.IntVar(&opts.minPercent, "min-percentage", opts.minPercent, "Minimum percentage of collection to check")
+	flag.IntVar(&opts.maxPercent, "max-percentage", opts.maxPercent, "Maximum percentage of collection to check")
+	flag.IntVar(&opts.maxMissingPercent, "max-missing-percentage", opts.maxMissingPercent, "Maximum percentage of report entries that may be missing")
 	flag.Parse()
 	if flag.NArg() > 0 {
 		fmt.Fprintf(os.Stderr, "Error: unexpected argument %q; options must use the --name=value form\n", flag.Arg(0))
 		return 2
 	}
-	if err := validateOptions(*flacPath, *folder, *report, *age, *minPercent, *maxPercent, *maxMissingPercent); err != nil {
+	if err := validateOptions(opts); err != nil {
 		fmt.Fprintln(os.Stderr, "Error:", err)
 		return 2
 	}
@@ -64,7 +61,7 @@ func run() int {
 	done := make(chan struct{})
 	defer close(done)
 	go announceInterruption(ctx, done, stop, os.Stderr)
-	if err := check(ctx, *flacPath, *folder, *report, *age, *minPercent, *maxPercent, *maxMissingPercent); err != nil {
+	if err := check(ctx, opts); err != nil {
 		fmt.Fprintln(os.Stderr, "Error:", err)
 		if errors.Is(err, errInterrupted) {
 			return exitInterrupted
@@ -93,25 +90,25 @@ func announceInterruption(ctx context.Context, done <-chan struct{}, stop func()
 	fmt.Fprintln(w, "Interruption requested; saving progress and releasing the report lock...")
 }
 
-func validateOptions(flac, folder, report string, age, minPercent, maxPercent, maxMissingPercent int) error {
-	if flac == "" || folder == "" || report == "" {
+func validateOptions(opts options) error {
+	if opts.flacPath == "" || opts.folder == "" || opts.report == "" {
 		return errors.New("--flac, --folder and --report are required")
 	}
-	if minPercent != optionNotSet && maxPercent != optionNotSet {
+	if opts.minPercent != optionNotSet && opts.maxPercent != optionNotSet {
 		return errors.New("--min-percentage and --max-percentage cannot be combined")
 	}
-	if age == optionNotSet && minPercent == optionNotSet {
+	if opts.age == optionNotSet && opts.minPercent == optionNotSet {
 		return errors.New("specify --age or --min-percentage; --max-percentage requires --age")
 	}
-	if age != optionNotSet && (age < -2 || int64(age) > int64(math.MaxInt64)/int64(time.Minute)) {
+	if opts.age != optionNotSet && (opts.age < -2 || int64(opts.age) > int64(math.MaxInt64)/int64(time.Minute)) {
 		return errors.New("--age must be -2, -1, or a non-negative number of minutes within the supported duration")
 	}
-	for _, p := range []int{minPercent, maxPercent} {
+	for _, p := range []int{opts.minPercent, opts.maxPercent} {
 		if p != optionNotSet && (p < 0 || p > 100) {
 			return errors.New("percentages must be between 0 and 100")
 		}
 	}
-	if maxMissingPercent < 0 || maxMissingPercent > 100 {
+	if opts.maxMissingPercent < 0 || opts.maxMissingPercent > 100 {
 		return errors.New("--max-missing-percentage must be between 0 and 100")
 	}
 	return nil

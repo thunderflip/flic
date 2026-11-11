@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,7 +16,7 @@ func TestReportLockExcludesOtherChecks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = check(context.Background(), "flac", dir, report, math.MinInt32, 100, math.MinInt32, 50)
+	err = check(context.Background(), testOptions("flac", dir, report, 100))
 	if err == nil || !strings.Contains(err.Error(), "PID:") || !strings.Contains(err.Error(), "Machine:") {
 		t.Fatalf("expected lock details, got %v", err)
 	}
@@ -63,7 +62,7 @@ func TestReportLockConcurrentAcquisition(t *testing.T) {
 func TestReportLockReleasedAfterFailure(t *testing.T) {
 	dir := t.TempDir()
 	report := filepath.Join(dir, "report.csv")
-	if err := check(context.Background(), "flac", filepath.Join(dir, "missing"), report, math.MinInt32, 100, math.MinInt32, 50); err == nil {
+	if err := check(context.Background(), testOptions("flac", filepath.Join(dir, "missing"), report, 100)); err == nil {
 		t.Fatal("expected directory error")
 	}
 	if _, err := os.Stat(report + ".lock"); !os.IsNotExist(err) {

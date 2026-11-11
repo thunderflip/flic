@@ -14,25 +14,51 @@ import (
 	"github.com/thunderflip/flic/integrity"
 )
 
-const modtimeTolerance = time.Millisecond
+const (
+	modtimeTolerance = time.Millisecond
+	autosaveInterval = 3 * time.Minute
 
-const autosaveInterval = 3 * time.Minute
+	// optionNotSet marks an integer option that was not given.
+	optionNotSet                = math.MinInt32
+	defaultMaxMissingPercentage = 50
+)
 
 var errInterrupted = errors.New("interrupted")
 
-func check(ctx context.Context, flacPath, folder, report string, age, minPercent, maxPercent, maxMissingPercent int) (resultErr error) {
+// options holds the settings of a run.
+type options struct {
+	flacPath, folder, report string
+	// age, minPercent and maxPercent select the files to check; each is
+	// optionNotSet when not given.
+	age, minPercent, maxPercent int
+	maxMissingPercent           int
+}
+
+// defaultOptions returns options with no file selection and the default
+// limit on missing files. Start from it rather than from options{}, whose
+// zero values would mean --age=0 and --min-percentage=0.
+func defaultOptions() options {
+	return options{
+		age:               optionNotSet,
+		minPercent:        optionNotSet,
+		maxPercent:        optionNotSet,
+		maxMissingPercent: defaultMaxMissingPercentage,
+	}
+}
+
+func check(ctx context.Context, opts options) (resultErr error) {
 	start := time.Now()
-	lock, err := acquireReportLock(report)
+	lock, err := acquireReportLock(opts.report)
 	if err != nil {
 		return err
 	}
 	defer func() { resultErr = errors.Join(resultErr, lock.release()) }()
-	store := integrity.Report{FilePath: report, Separator: ';'}
+	store := integrity.Report{FilePath: opts.report, Separator: ';'}
 	previous, err := store.Load()
 	if err != nil {
 		return err
 	}
-	files, err := (integrity.Directory{DirPath: folder}).Scan(ctx)
+	files, err := (integrity.Directory{DirPath: opts.folder}).Scan(ctx)
 	if err != nil {
 		if ctx.Err() != nil {
 			return fmt.Errorf("%w during scan; report was not modified", errInterrupted)
@@ -45,12 +71,12 @@ func check(ctx context.Context, flacPath, folder, report string, age, minPercent
 	if err := validateUniquePaths(files); err != nil {
 		return fmt.Errorf("scanned files: %w", err)
 	}
-	if err := checkMissingEntries(previous, files, maxMissingPercent); err != nil {
+	if err := checkMissingEntries(previous, files, opts.maxMissingPercent); err != nil {
 		return err
 	}
 	entries := mergeReportAndFiles(previous, files)
 	sort.Slice(entries, func(i, j int) bool { return entries[i].DateChecked.Before(*entries[j].DateChecked) })
-	limit := selectionLimit(entries, age, minPercent, maxPercent, time.Now())
+	limit := selectionLimit(entries, opts, time.Now())
 	if limit == len(entries) {
 		sort.Slice(entries, func(i, j int) bool { return entries[i].FilePath < entries[j].FilePath })
 	}
@@ -63,7 +89,7 @@ func check(ctx context.Context, flacPath, folder, report string, age, minPercent
 		}
 		path := entries[i].FilePath
 		fmt.Printf("Verifying (%d/%d): %s\n", i+1, limit, path)
-		operation := flac.Operation{FlacPath: flacPath, FilePath: path}
+		operation := flac.Operation{FlacPath: opts.flacPath, FilePath: path}
 		if err := operation.Test(ctx); err != nil {
 			if ctx.Err() != nil {
 				// flac was stopped by the interruption: the file was not verified.
@@ -89,27 +115,27 @@ func check(ctx context.Context, flacPath, folder, report string, age, minPercent
 	return nil
 }
 
-func selectionLimit(entries []integrity.Entry, age, minPercent, maxPercent int, now time.Time) int {
+func selectionLimit(entries []integrity.Entry, opts options, now time.Time) int {
 	limit := 0
-	if age != optionNotSet {
+	if opts.age != optionNotSet {
 		var cutoff time.Time
-		switch age {
+		switch opts.age {
 		case -1:
 			cutoff = integrity.DateUndefined
 		case -2:
 			y, m, d := now.Date()
 			cutoff = time.Date(y, m, d, 0, 0, 0, 0, now.Location())
 		default:
-			cutoff = now.Add(-time.Duration(age) * time.Minute)
+			cutoff = now.Add(-time.Duration(opts.age) * time.Minute)
 		}
 		limit = sort.Search(len(entries), func(i int) bool { return entries[i].DateChecked.After(cutoff) })
 	}
-	if minPercent != optionNotSet {
-		n := int(math.Ceil(float64(len(entries)) * float64(minPercent) / 100))
+	if opts.minPercent != optionNotSet {
+		n := int(math.Ceil(float64(len(entries)) * float64(opts.minPercent) / 100))
 		limit = max(limit, n)
 	}
-	if maxPercent != optionNotSet {
-		n := int(math.Floor(float64(len(entries)) * float64(maxPercent) / 100))
+	if opts.maxPercent != optionNotSet {
+		n := int(math.Floor(float64(len(entries)) * float64(opts.maxPercent) / 100))
 		limit = min(limit, n)
 	}
 	return limit
