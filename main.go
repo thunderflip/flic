@@ -54,6 +54,10 @@ func run() int {
 	maxPercent := flag.Int("max-percentage", optionNotSet, "Maximum percentage of collection to check")
 	maxMissingPercent := flag.Int("max-missing-percentage", defaultMaxMissingPercentage, "Maximum percentage of report entries that may be missing")
 	flag.Parse()
+	if flag.NArg() > 0 {
+		fmt.Fprintf(os.Stderr, "Error: unexpected argument %q; options must use the --name=value form\n", flag.Arg(0))
+		return 2
+	}
 	if err := validateOptions(*flac, *folder, *report, *age, *minPercent, *maxPercent, *maxMissingPercent); err != nil {
 		fmt.Fprintln(os.Stderr, "Error:", err)
 		return 2
