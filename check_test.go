@@ -69,8 +69,8 @@ func TestMissingEntriesThreshold(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, threshold := range []int{-1, 101} {
-		opts := testOptions("flac", "folder", "report", optionNotSet)
-		opts.age, opts.maxMissingPercent = 0, threshold
+		opts := testOptions("flac", "folder", "report", 0)
+		opts.age, opts.minPercent, opts.maxMissingPercent = given(0), optionalInt{}, threshold
 		if err := validateOptions(opts); err == nil {
 			t.Fatalf("accepted threshold %d", threshold)
 		}
@@ -112,13 +112,13 @@ func TestSelectionLimit(t *testing.T) {
 	old := now.Add(-48 * time.Hour)
 	recent := now.Add(-time.Hour)
 	entries := []integrity.Entry{{DateChecked: &old}, {DateChecked: &recent}, {DateChecked: &recent}}
-	if got := selectionLimit(entries, selection(-2, optionNotSet, optionNotSet), now); got != 1 {
+	if got := selectionLimit(entries, options{age: given(-2)}, now); got != 1 {
 		t.Fatalf("today: %d", got)
 	}
-	if got := selectionLimit(entries, selection(optionNotSet, 1, optionNotSet), now); got != 1 {
+	if got := selectionLimit(entries, options{minPercent: given(1)}, now); got != 1 {
 		t.Fatalf("minimum: %d", got)
 	}
-	if got := selectionLimit(entries, selection(0, optionNotSet, 33), now); got != 0 {
+	if got := selectionLimit(entries, options{age: given(0), maxPercent: given(33)}, now); got != 0 {
 		t.Fatalf("maximum: %d", got)
 	}
 }
@@ -188,13 +188,6 @@ func TestInterruptDuringVerificationSavesProgress(t *testing.T) {
 // least minPercent of the collection.
 func testOptions(flacPath, folder, report string, minPercent int) options {
 	opts := defaultOptions()
-	opts.flacPath, opts.folder, opts.report, opts.minPercent = flacPath, folder, report, minPercent
-	return opts
-}
-
-// selection returns default options with the given file selection.
-func selection(age, minPercent, maxPercent int) options {
-	opts := defaultOptions()
-	opts.age, opts.minPercent, opts.maxPercent = age, minPercent, maxPercent
+	opts.flacPath, opts.folder, opts.report, opts.minPercent = flacPath, folder, report, given(minPercent)
 	return opts
 }

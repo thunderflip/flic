@@ -7,6 +7,7 @@ import (
 	"math"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,11 +16,8 @@ import (
 )
 
 const (
-	modtimeTolerance = time.Millisecond
-	autosaveInterval = 3 * time.Minute
-
-	// optionNotSet marks an integer option that was not given.
-	optionNotSet                = math.MinInt32
+	modtimeTolerance            = time.Millisecond
+	autosaveInterval            = 3 * time.Minute
 	defaultMaxMissingPercentage = 50
 )
 
@@ -28,24 +26,48 @@ var errInterrupted = errors.New("interrupted")
 // options holds the settings of a run.
 type options struct {
 	flacPath, folder, report string
-	// age, minPercent and maxPercent select the files to check; each is
-	// optionNotSet when not given.
-	age, minPercent, maxPercent int
+	// age, minPercent and maxPercent select the files to check.
+	age, minPercent, maxPercent optionalInt
 	maxMissingPercent           int
 }
 
 // defaultOptions returns options with no file selection and the default
-// limit on missing files. Start from it rather than from options{}, whose
-// zero values would mean --age=0 and --min-percentage=0.
+// limit on missing files.
 func defaultOptions() options {
-	return options{
-		age:               optionNotSet,
-		minPercent:        optionNotSet,
-		maxPercent:        optionNotSet,
-		maxMissingPercent: defaultMaxMissingPercentage,
-	}
+	return options{maxMissingPercent: defaultMaxMissingPercentage}
 }
 
+// optionalInt is an integer option that remembers whether it was given; its
+// zero value means "not given". It implements flag.Value, and since its zero
+// value prints as "", the help shows no default for it.
+type optionalInt struct {
+	value int
+	set   bool
+}
+
+// given returns an optionalInt that was given with value v.
+func given(v int) optionalInt { return optionalInt{value: v, set: true} }
+
+func (o *optionalInt) String() string {
+	if o == nil || !o.set {
+		return ""
+	}
+	return strconv.Itoa(o.value)
+}
+
+func (o *optionalInt) Set(s string) error {
+	v, err := strconv.ParseInt(s, 0, strconv.IntSize)
+	if err != nil {
+		return errors.New("parse error")
+	}
+	*o = given(int(v))
+	return nil
+}
+
+// check runs one verification pass: it locks the report, merges it with the
+// FLAC files found under opts.folder, verifies the selected files with flac,
+// oldest check first, and saves the report periodically, at the end, and when
+// a verification fails or the run is interrupted.
 func check(ctx context.Context, opts options) (resultErr error) {
 	start := time.Now()
 	lock, err := acquireReportLock(opts.report)
@@ -117,25 +139,25 @@ func check(ctx context.Context, opts options) (resultErr error) {
 
 func selectionLimit(entries []integrity.Entry, opts options, now time.Time) int {
 	limit := 0
-	if opts.age != optionNotSet {
+	if opts.age.set {
 		var cutoff time.Time
-		switch opts.age {
+		switch opts.age.value {
 		case -1:
 			cutoff = integrity.DateUndefined
 		case -2:
 			y, m, d := now.Date()
 			cutoff = time.Date(y, m, d, 0, 0, 0, 0, now.Location())
 		default:
-			cutoff = now.Add(-time.Duration(opts.age) * time.Minute)
+			cutoff = now.Add(-time.Duration(opts.age.value) * time.Minute)
 		}
 		limit = sort.Search(len(entries), func(i int) bool { return entries[i].DateChecked.After(cutoff) })
 	}
-	if opts.minPercent != optionNotSet {
-		n := int(math.Ceil(float64(len(entries)) * float64(opts.minPercent) / 100))
+	if opts.minPercent.set {
+		n := int(math.Ceil(float64(len(entries)) * float64(opts.minPercent.value) / 100))
 		limit = max(limit, n)
 	}
-	if opts.maxPercent != optionNotSet {
-		n := int(math.Floor(float64(len(entries)) * float64(opts.maxPercent) / 100))
+	if opts.maxPercent.set {
+		n := int(math.Floor(float64(len(entries)) * float64(opts.maxPercent.value) / 100))
 		limit = min(limit, n)
 	}
 	return limit

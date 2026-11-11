@@ -35,13 +35,7 @@ func main() { os.Exit(run()) }
 
 func run() int {
 	opts := defaultOptions()
-	flag.StringVar(&opts.flacPath, "flac", opts.flacPath, "Path to the flac executable")
-	flag.StringVar(&opts.folder, "folder", opts.folder, "Root folder path to FLAC collection")
-	flag.StringVar(&opts.report, "report", opts.report, "Path to the report file")
-	flag.IntVar(&opts.age, "age", opts.age, "Age in minutes (-1: never checked, -2: before today)")
-	flag.IntVar(&opts.minPercent, "min-percentage", opts.minPercent, "Minimum percentage of collection to check")
-	flag.IntVar(&opts.maxPercent, "max-percentage", opts.maxPercent, "Maximum percentage of collection to check")
-	flag.IntVar(&opts.maxMissingPercent, "max-missing-percentage", opts.maxMissingPercent, "Maximum percentage of report entries that may be missing")
+	defineFlags(flag.CommandLine, &opts)
 	flag.Parse()
 	if flag.NArg() > 0 {
 		fmt.Fprintf(os.Stderr, "Error: unexpected argument %q; options must use the --name=value form\n", flag.Arg(0))
@@ -71,6 +65,25 @@ func run() int {
 	return 0
 }
 
+// defineFlags declares the command-line options of fs, stored into opts, and
+// its help message. The current values of opts are the defaults.
+func defineFlags(fs *flag.FlagSet, opts *options) {
+	fs.StringVar(&opts.flacPath, "flac", opts.flacPath, "`path` to the flac executable")
+	fs.StringVar(&opts.folder, "folder", opts.folder, "root `folder` of the FLAC collection")
+	fs.StringVar(&opts.report, "report", opts.report, "`path` to the report file")
+	fs.Var(&opts.age, "age", "select files by the age of their last check, in `minutes` (-1: never checked, -2: before today)")
+	fs.Var(&opts.minPercent, "min-percentage", "minimum `percentage` of the collection to check")
+	fs.Var(&opts.maxPercent, "max-percentage", "maximum `percentage` of the collection to check (with --age)")
+	fs.IntVar(&opts.maxMissingPercent, "max-missing-percentage", opts.maxMissingPercent, "maximum `percentage` of report entries that may be missing")
+	fs.Usage = func() {
+		out := fs.Output()
+		fmt.Fprintln(out, "Usage: flic --flac=PATH --folder=FOLDER --report=PATH (--age=MINUTES | --min-percentage=PERCENT) [options]")
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "Options:")
+		fs.PrintDefaults()
+	}
+}
+
 // announceInterruption waits for an interruption signal (ctx cancelled), then
 // restores default signal handling, so that a second Ctrl+C terminates
 // immediately, and tells the user that progress is being saved. It stays silent
@@ -94,17 +107,17 @@ func validateOptions(opts options) error {
 	if opts.flacPath == "" || opts.folder == "" || opts.report == "" {
 		return errors.New("--flac, --folder and --report are required")
 	}
-	if opts.minPercent != optionNotSet && opts.maxPercent != optionNotSet {
+	if opts.minPercent.set && opts.maxPercent.set {
 		return errors.New("--min-percentage and --max-percentage cannot be combined")
 	}
-	if opts.age == optionNotSet && opts.minPercent == optionNotSet {
+	if !opts.age.set && !opts.minPercent.set {
 		return errors.New("specify --age or --min-percentage; --max-percentage requires --age")
 	}
-	if opts.age != optionNotSet && (opts.age < -2 || int64(opts.age) > int64(math.MaxInt64)/int64(time.Minute)) {
+	if age := opts.age.value; opts.age.set && (age < -2 || int64(age) > int64(math.MaxInt64)/int64(time.Minute)) {
 		return errors.New("--age must be -2, -1, or a non-negative number of minutes within the supported duration")
 	}
-	for _, p := range []int{opts.minPercent, opts.maxPercent} {
-		if p != optionNotSet && (p < 0 || p > 100) {
+	for _, p := range []optionalInt{opts.minPercent, opts.maxPercent} {
+		if p.set && (p.value < 0 || p.value > 100) {
 			return errors.New("percentages must be between 0 and 100")
 		}
 	}

@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"flag"
+	"io"
+	"math"
 	"os"
 	"strings"
 	"testing"
@@ -19,13 +22,20 @@ func TestMain(m *testing.M) {
 }
 
 func TestValidateOptions(t *testing.T) {
-	unset := optionNotSet
+	unset := optionalInt{}
 	for _, tc := range []struct {
-		age, min, max int
+		age, min, max optionalInt
 		valid         bool
-	}{{unset, unset, unset, false}, {unset, unset, 10, false}, {0, unset, 10, true}, {unset, 1, unset, true}, {-3, unset, unset, false}, {0, 101, unset, false}, {0, 0, unset, true}, {0, 1, 1, false}} {
-		opts := selection(tc.age, tc.min, tc.max)
+	}{
+		{unset, unset, unset, false}, {unset, unset, given(10), false}, {given(0), unset, given(10), true},
+		{unset, given(1), unset, true}, {given(-3), unset, unset, false}, {given(0), given(101), unset, false},
+		{given(0), given(0), unset, true}, {given(0), given(1), given(1), false},
+		// The former "not set" marker is now an ordinary, invalid age.
+		{given(math.MinInt32), unset, unset, false},
+	} {
+		opts := defaultOptions()
 		opts.flacPath, opts.folder, opts.report = "flac", "folder", "report"
+		opts.age, opts.minPercent, opts.maxPercent = tc.age, tc.min, tc.max
 		err := validateOptions(opts)
 		if (err == nil) != tc.valid {
 			t.Fatalf("%+v: %v", tc, err)
@@ -56,5 +66,47 @@ func TestAnnounceInterruption(t *testing.T) {
 				t.Fatalf("announced %v, stopped %v, want %v: %q", announced, stopped, tc.announced, out.String())
 			}
 		})
+	}
+}
+
+func TestFlags(t *testing.T) {
+	parse := func(args ...string) (options, error) {
+		opts := defaultOptions()
+		fs := flag.NewFlagSet("flic", flag.ContinueOnError)
+		fs.SetOutput(io.Discard)
+		defineFlags(fs, &opts)
+		return opts, fs.Parse(args)
+	}
+	opts, err := parse("--flac=f", "--folder=d", "--report=r", "--age=-2", "--max-percentage", "25")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := options{flacPath: "f", folder: "d", report: "r", age: given(-2), maxPercent: given(25), maxMissingPercent: defaultMaxMissingPercentage}
+	if opts != want {
+		t.Fatalf("parsed %+v, want %+v", opts, want)
+	}
+	if opts, err := parse("--age=0"); err != nil || opts.age != given(0) || opts.minPercent.set {
+		t.Fatalf("--age=0 must be given and distinct from unset: %+v %v", opts, err)
+	}
+	if _, err := parse("--age=x"); err == nil {
+		t.Fatal("accepted a non-numeric age")
+	}
+}
+
+func TestHelpShowsNoInternalDefaults(t *testing.T) {
+	opts := defaultOptions()
+	fs := flag.NewFlagSet("flic", flag.ContinueOnError)
+	var help strings.Builder
+	fs.SetOutput(&help)
+	defineFlags(fs, &opts)
+	fs.Usage()
+	text := help.String()
+	for _, want := range []string{"Usage: flic", "-age minutes", "-min-percentage percentage", "(default 50)"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("help lacks %q:\n%s", want, text)
+		}
+	}
+	if strings.Count(text, "(default") != 1 || strings.Contains(text, "-2147483648") {
+		t.Errorf("help shows unexpected defaults:\n%s", text)
 	}
 }
