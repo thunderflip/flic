@@ -54,7 +54,6 @@ Choose `--age` or `--min-percentage` to identify files to check. `--max-percenta
 | --- | --- |
 | `--age=-1` | Files never checked, including files detected as new or modified |
 | `--age=-2` | Files last checked at or before the start of the current local day |
-| `--age=0` | Files last checked up to the current time |
 | `--age=10080` | Files last checked at least 10,080 minutes ago (one week) |
 
 Any other non-negative value specifies an age in minutes. Negative values other than `-1` and `-2` are invalid.
